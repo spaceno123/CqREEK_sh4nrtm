@@ -1,0 +1,72 @@
+### for MAKE Version 4.0  Copyright (c) 1987, 1996 Borland International ###
+
+#=== macro's ===
+C38 = SHC $< -DEBUG
+ASM = ASMSH $< -DEBUG -CPU=SH4
+LNK = LNK -SUBCOMMAND=$&.sub -DEBUG
+CNV = C38H $<
+#===============
+
+#=== roule's ===
+.c.obj:
+	$(C38)
+.src.obj:
+	$(ASM) # > $&.tag
+#===============
+
+#--- link's ---
+STARTUP = src\setup.obj src\user.obj
+DEBUGER = dbg\__debug.obj dbg\__hlpdsp.obj dbg\__dbgmod.obj dbg\__dmpmem.obj \
+	  dbg\__dmpsiz.obj dbg\__wflash.obj dbg\__loadsf.obj dbg\__inimem.obj \
+	  dbg\__disasm.obj dbg\__chnmem.obj dbg\__chnmsz.obj dbg\__dmpwch.obj \
+	  dbg\__wchsiz.obj
+#--------------
+
+#--- make test and flash version ---
+all:	debuger.abs
+
+#--- make .abs (for debug) ---
+debuger.abs:	$(STARTUP) $(DEBUGER) \
+		makefile
+	copy &&!
+OUTPUT $&
+PRINT $&
+ENTRY vbr_adr
+INPUT $(STARTUP)
+INPUT $(DEBUGER)
+START P1,DBG_P1,U,FE,DBG_B1,S1,S(08000000)
+EXIT
+! $&.sub > nul
+	$(LNK)
+
+src\setup.obj:	src\setup.src include\ioregs.inc include\macros.inc
+
+src\user.obj:	src\user.src
+
+dbg\__debug.obj:	dbg\__debug.src include\ioregs.inc include\macros.inc
+
+dbg\__hlpdsp.obj:	dbg\__hlpdsp.src include\ioregs.inc include\macros.inc
+
+dbg\__dbgmod.obj:	dbg\__dbgmod.src include\ioregs.inc include\macros.inc
+
+dbg\__dmpmem.obj:	dbg\__dmpmem.src include\ioregs.inc include\macros.inc
+
+dbg\__dmpsiz.obj:	dbg\__dmpsiz.src include\ioregs.inc include\macros.inc
+
+dbg\__wflash.obj:	dbg\__wflash.src include\ioregs.inc include\macros.inc
+
+dbg\__loadsf.obj:	dbg\__loadsf.src include\ioregs.inc include\macros.inc
+
+dbg\__inimem.obj:	dbg\__inimem.src include\ioregs.inc include\macros.inc
+
+dbg\__disasm.obj:	dbg\__disasm.src include\ioregs.inc include\macros.inc
+
+dbg\__chnmem.obj:	dbg\__chnmem.src include\ioregs.inc include\macros.inc
+
+dbg\__chnmsz.obj:	dbg\__chnmsz.src include\ioregs.inc include\macros.inc
+
+dbg\__dmpwch.obj:	dbg\__dmpwch.src include\ioregs.inc include\macros.inc
+
+dbg\__wchsiz.obj:	dbg\__wchsiz.src include\ioregs.inc include\macros.inc
+
+

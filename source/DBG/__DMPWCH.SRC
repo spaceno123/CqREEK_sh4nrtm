@@ -1,0 +1,240 @@
+;
+;	Program	__DMPWCH.SRC
+;	Date	2001/11/10 .. 2001/1/11
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/11/12	add export dbg_putc_db for dbg_wch_siz
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf, dbg_chk_rxd_buf, dbg_puts
+	.import	dbg_dmp_mem_hex, dbg_dmp_mem_asc
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_chk_rxd_buf_sub
+	branch	dbg_chk_rxd_buf
+
+dbg_puts_sub
+	branch	dbg_puts
+
+dbg_dmp_mem_hex_sub
+	branch	dbg_dmp_mem_hex
+
+dbg_dmp_mem_asc_sub
+	branch	dbg_dmp_mem_asc
+
+	;//////////////////
+	;/// dump watch ///
+	;//////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_dmp_wch
+dbg_dmp_wch:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_dmp_wch_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_dmp_wch_3	; error !
+	push	r0		;!
+	push	r0		;!!
+	mov	#0,r0	;line count (r0h=hold,r0l=disp)
+dbg_dmp_wch_0
+	bsr	dbg_chk_rxd_buf_sub	;<ent> none. <ret> T=1:data in
+	push	r0		;!!!
+	;
+	bt	dbg_dmp_wch_2	; break !
+	mov.l	@(4,sp),r0	;!!
+	bsr	dbg_dmp_mem_hex_sub	;<ent> r0=start, r1=end <ret> T=0:end
+	nop
+	;
+	bsr	dbg_dmp_mem_asc_sub	;<ent> r0=start, r1=end <ret> T=0:end
+	nop
+	;
+	bf	dbg_dmp_wch_1	; end !
+	add	#H'10,r0
+	not	r0,r0
+	or	#H'0f,r0
+	not	r0,r0
+	mov.l	r0,@(4,sp)	;!!
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	pop	r0		;!!!
+	push	r1		;!!!
+	swap.b	r0,r1
+	cmp/eq	r1,r0
+	bf	dbg_dmp_wch_0a
+	swap.b	r0,r0
+	add	#1,r0
+	swap.b	r0,r0
+dbg_dmp_wch_0a
+	add	#1,r0
+	bra	dbg_dmp_wch_0
+	pop	r1		;!!!
+	;
+dbg_dmp_wch_1
+	pop	r0		;!!!
+	push	r1		;!!!
+	mov	r0,r1
+	mov	#24,r0
+	shll8	r0
+	cmp/hs	r0,r1
+	bt	dbg_dmp_wch_2b
+	bsr	dbg_putc_sub
+	mov	#H'0d,r0
+	;
+	swap.b	r1,r0
+	extu.b	r0,r0
+	cmp/eq	#0,r0
+	bt	dbg_dmp_wch_1a
+	push	r0		;!!!!
+	mov.l	#dbg_dmp_wch_rep,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	bsr	dbg_putc_db
+	mov.l	@sp,r0
+	;
+	bsr	dbg_puts_sub
+	nop
+	;
+	pop	r0		;!!!!
+dbg_dmp_wch_1a
+	mov.l	@(8,sp),r1	;!
+	mov.l	r1,@(4,sp)	;!!
+	shll8	r0
+	bra	dbg_dmp_wch_0
+	pop	r1		;!!!
+	;
+dbg_dmp_wch_2
+	mov.l	@sp,r0		;!!!
+dbg_dmp_wch_2a
+	swap.b	r0,r1
+	cmp/eq	r0,r1
+	bt	dbg_dmp_wch_2b
+	mov	r0,r1
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	mov	r1,r0
+	bra	dbg_dmp_wch_2a
+	add	#1,r0
+	;
+dbg_dmp_wch_2b
+	add	#12,sp		;!!!,!!,!
+	sett
+dbg_dmp_wch_3
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_dmp_wch_scn
+	.sdataz	"%x,%x\r"
+dbg_dmp_wch_rep
+	.sdataz <H'1b>"["<0>"A"	; cursor n line up
+	.align	8
+
+	.export	dbg_putc_db
+dbg_putc_db
+	push	r1	;!
+	sts.l	pr,@-sp	;!!
+	bsr	divxu_w
+	mov	#100,r1
+	;
+	tst	r0,r0
+	bt	dbg_putc_db_0
+	bsr	dbg_putc_sub
+	add	#"0",r0
+	;
+	mov	r1,r0
+	bsr	divxu_w
+	mov	#10,r1
+	;
+	bra	dbg_putc_db_1
+	nop
+dbg_putc_db_0
+	mov	r1,r0
+	bsr	divxu_w
+	mov	#10,r1
+	;
+	tst	r0,r0
+	bt	dbg_putc_db_2
+dbg_putc_db_1
+	bsr	dbg_putc_sub
+	add	#"0",r0
+	;
+dbg_putc_db_2
+	mov	r1,r0
+	bsr	dbg_putc_sub
+	add	#"0",r0
+	;
+	lds.l	@sp+,pr
+	rts
+	pop	r1
+
+divxu_w	; r0(32)/r1(16) = r0(16)...r1(16)
+	shll16	r1
+	tst	r1,r1
+	bt	divxu_w_0	; zero !
+	cmp/hs	r1,r0
+	bt	divxu_w_0	; over !
+	push	r0		;!
+	div0u
+	.arepeat 16
+	div1	r1,r0
+	.aendr
+	rotcl	r0
+	extu.w	r0,r0
+	push	r0		;!!
+	sts.l	macl,@-sp	;!!!
+	shlr16	r1
+	mul.l	r0,r1
+	sts.l	macl,r0
+	lds.l	@sp+,macl	;!!!
+	mov.l	@(4,sp),r1	;!
+	sub	r0,r1
+	pop	r0		;!!
+	add	#4,sp		;!
+divxu_w_0
+	rts
+	nop
+
+;	;R1(32 ﾋﾞｯﾄ)÷R0(16 ﾋﾞｯﾄ)=R1(16 ﾋﾞｯﾄ):符号なし
+;	SHLL16	R0		;除数を上位16 ビット、下位16 ビットを0 に設定
+;	TST	R0,R0		;ゼロ除算チェック
+;	BT	ZERO_DIV	;
+;	CMP/HS	R0,R1		;オーバフローチェック
+;	BT	OVER_DIV	;
+;	DIV0U			;フラグの初期化
+;	.arepeat 16		;
+;	DIV1	R0,R1		;16 回繰り返し
+;	.aendr			;
+;	ROTCL	R1		;
+;	EXTU.W	R1,R1		;R1=商
+
+	.end
+

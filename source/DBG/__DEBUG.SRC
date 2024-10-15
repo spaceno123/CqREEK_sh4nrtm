@@ -1,0 +1,1503 @@
+;
+;	Program	__DEBUG.SRC
+;	Date	2001/1/3 .. 2001/1/7
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/1/13	section P0 -> DBG_P1, B0 -> DBG_B
+; 2001/1/13	add chk_buf, dbg_chk_rxd_buf, dbg_scanf
+; 2001/1/14	RTS2 in -> out
+; 2001/1/14	add dbg_gethen, dbg_puthn, dbg_dmp_mem
+; 2001/1/16	add dbg_dmp_mem to cmd2
+; 2001/1/20	add dbg_ungetc, dbg_get_ungetc_buf
+; 2001/1/28	add dbg_dmp_siz
+; 2001/2/18	modify section offset
+; 2001/2/20	add dbg_wri_fla
+; 2001/2/27	export dbg_getc
+; 2001/2/28	separate dbg_gethen -> dbg_hex_to_bin
+; 2001/3/1	add dbg_gethn, dbg_lod_sfo
+; 2001/3/6	add dbg_wrf_rst, dbg_ini_mem
+; 2001/3/12	38400bps -> 115200bps
+; 2001/3/15	add dbg_wai_snd_emp for flash write
+; 2001/3/24	bit wait 38400 -> 115200, add dbg_reset
+; 2001/3/27	modify usr_sp -> dbg_usp
+; 2001/3/28	add dbg_dmp_reg
+; 2001/5/9	add dbg_dis_asm
+; 2001/5/16	add dbg_puth1
+; 2001/5/19	add dbg_dmp_rip
+; 2001/7/9	add dbg_dmp_frg
+; 2001/8/13	add dbg_mode_in
+; 2001/8/15	rxd data mask (and H'ff), add dbg_brk_run, dbg_ste_run ...
+; 2001/9/22	modify filename, export dbg_gethen, add dbg_chn_mem
+; 2001/9/23	export dbg_hex_to_bin, add dbg_chn_msz
+; 2001/9/24	export dbg_getche, add dbg_chn_reg
+; 2001/11/11	add dbg_dmp_wch
+; 2001/11/12	add dbg_wch_siz
+; 2001/11/28	add dbg_vew_lst
+; 2001/12/2	add dbg_vew_trc, dbg_vew_ste
+; 2002/2/17 x	add dbg_chn_bps
+; 2002/2/20 x	add dbg_lod_cmd, dbg_lod_set, dbg_lod_dsp, dbg_lod_adr_stk
+; 2002/6/1	on ram version (RTS2 in -> out)
+; 2002/7/16	add dbg_usr_getc, dbg_usr_putc, some entry _ +
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;////////////////////////
+	;/// debug initialize ///
+	;////////////////////////
+
+SIOBPS	.equ	115200	; serial bit rate
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_ini, _dbg_ini
+_dbg_ini:
+dbg_ini:
+	;* work clear *
+	mov.l	#dbg_wrk_tail,r1
+	mov.l	#dbg_wrk_head,r2
+	mov	#0,r0
+dbg_ini_0
+	mov.l	r0,@-r1
+	cmp/eq	r1,r2
+	bf	dbg_ini_0
+	;* ungetc none *
+	mov.l	#ungetc_buf,r1
+	mov	#-1,r0
+	mov.w	r0,@r1
+	;* start address *
+	mov.l	#dbg_stk_top,r1
+	mov.l	#dbg_ent,r0
+	mov.l	r0,@-r1
+	;* stack *
+	mov.l	#dbg_sp,r0
+	mov.l	r1,@r0
+	;* exit address *
+	mov.l	#dbg_slp,r1
+	mov.l	#dbg_sci_end,r0
+	mov.l	r0,@r1
+	;* command entry *
+	mov.l	#dbg_cmd,r1
+	mov.l	#dbg_cmd_top,r0
+	mov.l	r0,@r1
+	;* SCIF *
+	mov.l	#SCSCR2,r1	; TIE RIE TE RE REIE - CKE1 -
+	mov	#B'00000000,r0	;  0   0   0  0   0  0   0  0
+	mov.w	r0,@r1
+	mov.l	#SCFCR2,r1	; RTRG1 RTRG0 TTRG1 TTRG0 MCE TFRST RFRST LOOP
+	mov	#B'00000110,r0	;   0     0     0     0    0    1     1     0
+	mov.w	r0,@r1
+	mov.l	#SCSMR2,r1	; - CHR PE O/E STOP - CKS1 CKS0
+	mov	#B'00000000,r0	; 0  0   0  0    0  0   0    0
+	mov.w	r0,@r1
+	mov.l	#SCBRR2,r1
+	mov	#(33333300/((64/2)*SIOBPS))-1,r0; CLK=33.3333MHz,rate=SIOBPS
+	mov.b	r0,@r1
+	mov.l	#200000000/SIOBPS/3,r0		; SYS=200MHz,1bit=SIOBPS
+dbg_ini_1
+	dt	r0		;1
+	bf	dbg_ini_1	;1+1
+	mov.l	#SCFCR2,r1
+	mov	#B'00110000,r0
+	mov.w	r0,@r1
+	mov.l	#SCLSR2,r1	; --------------- ORER
+	mov.w	@r1,r0		; 000000000000000   0
+	mov	#0,r0
+	mov.w	r0,@r1
+	mov.l	#SCFSR2,r1	; PER3-0 FER3-0 ER TEND TDFE BRK FER PER RDF DR
+	mov.w	@r1,r0		;  0000   0000   0   1    1   0   0   0   0   0
+	and	#B'01100000,r0
+	mov.w	r0,@r1
+	mov.l	#SCSPTR2,r1	; RTSIO RTSDT CTSIO CTSDT -- SPB2IO SPB2DT
+	mov	#H'80,r0	;   1     0     0     0   00    0      0
+	mov.w	r0,@r1
+	mov.l	#IPRC,r1
+	mov.w	@r1,r0
+	or	#B'11110000,r0	; B'1111=15
+	mov.w	r0,@r1
+	mov.l	#SCSCR2,r1
+	mov	#B'01111000,r0
+	mov.w	r0,@r1
+	rts
+	nop
+
+	;/////////////////////
+	;/// sci interrupt ///
+	;/////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_sci_err, _dbg_sci_err
+_dbg_sci_err:
+dbg_sci_err:
+	mov.l	#SCLSR2,r1
+	mov.w	@r1,r0
+	tst	#1,r0
+	bt	dbg_sci_err_0a
+	;* over run *
+dbg_sci_err_0	; from dbg_sci_rxd
+	mov	#0,r0
+	mov.w	r0,@r1
+	;
+	;
+	;
+dbg_sci_err_0a
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+dbg_sci_err_1	; from dbg_sci_rxd
+	tst	#B'10000000,r0
+	bt	dbg_sci_err_1a
+	;* error *
+	;
+	;
+	;
+dbg_sci_err_1a
+	tst	#B'00010000,r0
+	bt	dbg_sci_err_2
+	;* break *
+	;
+	;
+	;
+dbg_sci_err_2
+	tst	#B'00000001,r0
+	bt	dbg_sci_err_3
+	;* data *
+	mov.l	#SCFRDR2,r0
+	mov.b	@r0,r0
+dbg_sci_err_3
+	mov.w	@r1,r0
+	and	#B'01101110,r0
+	mov.w	r0,@r1
+	rte
+	nop
+
+	.export	dbg_sci_rxd, _dbg_sci_rxd
+_dbg_sci_rxd:
+dbg_sci_rxd:
+	;* error check *
+	mov.l	#SCLSR2,r1
+	mov.w	@r1,r0
+	tst	#1,r0
+	bf	dbg_sci_err_0
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+	tst	#B'10010001,r0
+	bf	dbg_sci_err_1
+	tst	#B'00000010,r0
+	bt	dbg_sci_rxd	;?
+	;* save registers *
+	sts.l	pr,@-sp
+	stc.l	ssr,@-sp
+	stc.l	spc,@-sp
+	stc.l	r0_bank,@-sp
+	stc.l	r1_bank,@-sp
+	;* get data *
+	mov.l	#SCFRDR2,r1
+	mov.b	@r1,r0
+	and	#H'ff,r0					;+ 01/8/15
+	ldc	r0,r0_bank
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+	and	#B'11111101,r0
+	mov.w	r0,@r1
+	;* interrupt mask & rb,bl clear *
+	mov	#B'11001111,r1	;r1 = 11111111 11111111 11111111 11001111
+	swap.b	r1,r1		;r1 = 11111111 11111111 11001111 11111111
+	swap.w	r1,r1		;r1 = 11001111 11111111 11111111 11111111
+	stc	sr,r0
+	or	#B'11110000,r0	;mask = 1111
+	and	r1,r0		;rb=0,bl=0
+	ldc	r0,sr
+	;* stack change & return *
+	mov.l	#dbg_usp,r1
+	mov.l	sp,@r1
+	add	#4,r1
+	mov.l	@r1,sp
+	lds.l	@sp+,pr
+	rts
+	sett	; T=1:rxd interrupt (r0=data)
+
+	.export	dbg_sci_txd, _dbg_sci_txd
+_dbg_sci_txd:
+dbg_sci_txd:
+	;* check *
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+	tst	#B'00100000,r0
+	bt	dbg_sci_txd	;?
+	;* save registers *
+	sts.l	pr,@-sp
+	stc.l	ssr,@-sp
+	stc.l	spc,@-sp
+	stc.l	r0_bank,@-sp
+	stc.l	r1_bank,@-sp
+	;* interrupt mask & rb,bl clear *
+	mov	#B'11001111,r1	;r1 = 11111111 11111111 11111111 11001111
+	swap.b	r1,r1		;r1 = 11111111 11111111 11001111 11111111
+	swap.w	r1,r1		;r1 = 11001111 11111111 11111111 11111111
+	stc	sr,r0
+	or	#B'11110000,r0	;mask = 1111
+	and	r1,r0		;rb=0,bl=0
+	ldc	r0,sr
+	;* stack change & return *
+	mov.l	#dbg_usp,r1
+	mov.l	sp,@r1
+	add	#4,r1	;r1=dbg_sp
+	mov.l	@r1,sp
+	lds.l	@sp+,pr
+	rts
+	clrt	; T=0:txd interrupt
+
+	.export	dbg_sci_end
+dbg_sci_end:
+	;* stack change *
+	sts	pr,@-sp
+	mov.l	#dbg_sp,r1
+	mov.l	sp,@r1
+	add	#-4,r1	;r1=dbg_usp
+	mov.l	@r1,sp
+	;* rb,bl set *
+	mov	#B'00110000,r1	;r1 = 00000000 00000000 00000000 00110000
+	swap.b	r1,r1		;r1 = 00000000 00000000 00110000 00000000
+	swap.w	r1,r1		;r1 = 00110000 00000000 00000000 00000000
+	stc	sr,r0
+	or	r1,r0
+	ldc	r0,sr
+	;* load registers *
+	ldc.l	@sp+,r1_bank
+	ldc.l	@sp+,r0_bank
+	ldc.l	@sp+,spc
+	ldc.l	@sp+,ssr
+	rte
+	lds.l	@sp+,pr
+
+	.export	dbg_sci_lop
+dbg_sci_lop:
+	;* check *
+	mov.l	#SCLSR2,r1
+	mov.w	@r1,r0
+	tst	#1,r0
+	bf	dbg_sci_lop_1
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+	tst	#B'10010001,r0
+	bf	dbg_sci_lop_2
+	tst	#B'00000010,r0
+	bt	dbg_sci_lop_0	; not receive !
+	;* receive *
+	mov.l	#SCFRDR2,r1
+	mov.b	@r1,r0
+	push	r0
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+	and	#B'11111101,r0
+	mov.w	r0,@r1
+	pop	r0
+	rts
+	sett
+	;
+dbg_sci_lop_0
+	tst	#B'00100000,r0
+	bt	dbg_sci_lop	; transmit not empty !
+	mov.l	#SCSCR2,r1
+	mov.w	@r1,r0
+	tst	#B'10000000,r0
+	bt	dbg_sci_lop	; transmit interrupt disable !
+	;* transmit *
+	rts
+	clrt
+	;
+	;* over run *
+dbg_sci_lop_1
+	mov	#0,r0
+	mov.w	r0,@r1
+	;
+	;
+	;
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+dbg_sci_lop_2
+	tst	#B'10000000,r0
+	bt	dbg_sci_lop_2a
+	;* error *
+	;
+	;
+	;
+dbg_sci_lop_2a
+	tst	#B'00010000,r0
+	bt	dbg_sci_lop_2b
+	;* break *
+	;
+	;
+	;
+dbg_sci_lop_2b
+	tst	#B'00000001,r0
+	bt	dbg_sci_lop_3
+	;* data *
+	mov.l	#SCFRDR2,r0
+	mov.b	@r0,r0
+dbg_sci_lop_3
+	mov.w	@r1,r0
+	and	#B'01101110,r0
+	mov.w	r0,@r1
+	bra	dbg_sci_lop
+	nop
+
+	.import	dbg_mode_in_ent
+	.export	dbg_mode_in, _dbg_mode_in
+_dbg_mode_in:
+dbg_mode_in:
+	;* check *
+	mov.l	#dbg_stk_top-4,r1
+	mov.l	@r1,r0
+	mov.l	#dbg_ent,r1
+	cmp/eq	r1,r0
+	bt	dbg_mode_in_0	; monitor not active !
+	rte
+	nop
+	;* save registers *
+dbg_mode_in_0
+	sts.l	pr,@-sp
+	stc.l	ssr,@-sp
+	stc.l	spc,@-sp
+	stc.l	r0_bank,@-sp
+	stc.l	r1_bank,@-sp
+	;* interrupt mask & rb,bl clear *
+	mov	#B'11001111,r1	;r1 = 11111111 11111111 11111111 11001111
+	swap.b	r1,r1		;r1 = 11111111 11111111 11001111 11111111
+	swap.w	r1,r1		;r1 = 11001111 11111111 11111111 11111111
+	stc	sr,r0
+	or	#B'11110000,r0	;mask = 1111
+	and	r1,r0		;rb=0,bl=0
+	ldc	r0,sr
+	;* stack change & return *
+	mov.l	#dbg_usp,r1
+	mov.l	sp,@r1
+	add	#4,r1
+	mov.l	@r1,sp
+	add	#4,sp		; return address
+	mov.l	#dbg_ent_2,r0	;
+	lds.l	r0,pr		;
+	mov.l	#dbg_mode_in_ent,r0
+	jmp	@r0
+	clrt	;(not data)
+
+	.export	dbg_dbr_ent
+dbg_dbr_ent:
+	;* save registers *
+	sts.l	pr,@-sp
+	stc.l	ssr,@-sp
+	stc.l	spc,@-sp
+	stc.l	r0_bank,@-sp
+	stc.l	r1_bank,@-sp
+	;* set data *
+	mov	#-1,r0
+	ldc	r0,r0_bank
+	;* interrupt mask & rb,bl clear *
+	mov	#B'11001111,r1	;r1 = 11111111 11111111 11111111 11001111
+	swap.b	r1,r1		;r1 = 11111111 11111111 11001111 11111111
+	swap.w	r1,r1		;r1 = 11001111 11111111 11111111 11111111
+	stc	sr,r0
+	or	#B'11110000,r0	;mask = 1111
+	and	r1,r0		;rb=0,bl=0
+	ldc	r0,sr
+	;* stack change & return *
+	mov.l	#dbg_usp,r1
+	mov.l	sp,@r1
+	add	#4,r1
+	mov.l	@r1,sp
+	lds.l	@sp+,pr
+	rts
+	sett	; T=1:rxd interrupt (r0=data:-1)
+
+	;//////////////////////////
+	;/// transmit & receive ///
+	;//////////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+;- debug put txd -
+; entry	 @sp=data
+; return T=1(for put_txd_buf)
+;	 r0=data,sp+=4
+; break	 r0,r1
+dbg_put_txd:
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+	tst	#B'00100000,r0
+	bt	dbg_put_txd_1	; not empty !
+	mov.l	@sp,r0	;!
+dbg_put_txd_0	; from snd_txd_buf (with push r0)
+	mov.l	#SCFTDR2,r1
+	mov.b	r0,@r1
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+	and	#B'11011111,r0	; TDFE clear
+	mov.w	r0,@r1
+	mov.l	#SCSCR2,r1
+	mov.w	@r1,r0
+	or	#B'10000000,r0	; TIE set
+	mov.w	r0,@r1
+	sett	;T=1 for put_txd_buf
+dbg_put_txd_1
+	rts
+	pop	r0	;!
+
+;- send txd buffer for debuger wait loop -
+; entry	 none.
+; return none.
+; break	 r0,r1
+snd_txd_buf:
+	mov.l	#SCFSR2,r1
+	mov.w	@r1,r0
+	tst	#B'00100000,r0
+	bf	snd_txd_buf_0
+	rts	;?
+	nop
+	;
+snd_txd_buf_0
+	sts.l	pr,@-sp
+	bsr	get_txd_buf
+	nop
+	;
+	lds.l	@sp+,pr
+	bf	snd_txd_buf_1
+	bra	dbg_put_txd_0
+	push	r0	;!
+	;
+	;* txd interrupt disable *
+snd_txd_buf_1
+	mov.l	#SCSCR2,r1
+	mov.w	@r1,r0
+	and	#B'01111111,r0
+	rts
+	mov.w	r0,@r1
+
+;- get buffer -
+; entry	 r0=buffer structur address
+;	 r1=buffer size (1,2,4,8,16,32,64)
+; return T=1:ok(r0=data),0:none.
+; break	 r0,r1
+get_buf:
+	push	r0		;!
+	mov.b	@(buf_act,r0),r0
+	cmp/eq	#0,r0
+	bf	get_buf_0	; active != 0 !
+	add	#4,sp		;!
+	rts
+	clrt
+	;
+get_buf_0
+	push	r1		;!!
+	mov.l	@(4,sp),r1	;!
+	add	#-1,r0
+	mov.b	r0,@(buf_act,r1)
+	add	#1,r0
+	xor	r0,r1
+	xor	r1,r0
+	xor	r0,r1
+	mov.b	@(buf_wrp,r0),r0
+	sub	r1,r0
+	pop	r1		;!!
+	add	#-1,r1
+	and	r1,r0
+	pop	r1		;!
+	add	r0,r1
+	mov.b	@(buf_top,r1),r0
+	and	#H'ff,r0
+	rts
+	sett
+
+;- put buffer -
+; entry	 @sp=data
+;	 r0=buffer structur address
+;	 r1=buffer size (1,2,4,8,16,32,64)
+; return T=1:ok,0:buffer full
+;	 r0=data,sp+=4
+; break	 r1
+put_buf:
+	push	r0		;!!
+	mov.b	@(buf_act,r0),r0
+	cmp/hs	r1,r0
+	bf	put_buf_0	; active < buffer size !
+	add	#4,sp		;!!
+	pop	r0		;!
+	rts
+	clrt
+	;
+put_buf_0
+	push	r1		;!!!
+	mov.l	@(4,sp),r1	;!!
+	add	#1,r0
+	mov.b	r0,@(buf_act,r1)
+	mov.b	@(buf_wrp,r1),r0
+	add	#1,r0
+	mov.b	r0,@(buf_wrp,r1)
+	add	#-1,r0
+	pop	r1		;!!!
+	add	#-1,r1
+	and	r1,r0
+	pop	r1		;!!
+	add	r0,r1
+	pop	r0		;!
+	mov.b	r0,@(buf_top,r1)
+	rts
+	sett
+
+;- check buffer -
+; entry	 r0=buffer structur address
+; return T=1:data in,0:none.
+; break	 r0
+chk_buf:
+	mov.b	@(buf_act,r0),r0
+	cmp/eq	#0,r0
+	bf	chk_buf_0
+	rts
+	clrt	;none.
+	;
+chk_buf_0
+	rts
+	sett	;data in
+
+;- get txd buffer -
+; entry	 none.
+; return T=1:ok(r0=data),0:none.
+; break	 r0,r1
+get_txd_buf:
+	mov.l	#txd_buf_str,r0
+	bra	get_buf
+	mov	#BUF_SIZ,r1
+
+;- put txd buffer -
+; entry	 r0=data
+; return T=1:ok,0:buffer full
+; break	 r1
+put_txd_buf:
+	push	r0	;!
+	mov.l	#SCSCR2,r1
+	mov.w	@r1,r0
+	tst	#B'10000000,r0
+	bt	dbg_put_txd	; sci interrupt disable !
+	mov.l	#txd_buf_str,r0
+	bra	put_buf
+	mov	#BUF_SIZ,r1
+
+;- get rxd buffer -
+; entry	 none.
+; return T=1:ok(r0=data),0:none.
+; break	 r0,r1
+get_rxd_buf:
+	mov.l	#rxd_buf_str,r0
+	bra	get_buf
+	mov	#BUF_SIZ,r1
+
+;- put rxd buffer -
+; entry	 r0=data
+; return T=1:ok,0:buffer full
+; break	 r1
+put_rxd_buf:
+	push	r0	;!
+	mov.l	#rxd_buf_str,r0
+	bra	put_buf
+	mov	#BUF_SIZ,r1
+
+;- check rxd buffer -
+; entry	 none.
+; return T=1:data in,0:none.
+; break	 r0
+	.export	dbg_chk_rxd_buf
+dbg_chk_rxd_buf:
+	mov.l	#rxd_buf_str,r0
+	bra	chk_buf
+	nop
+
+;- wait send empty -
+; entry	 none.
+; return none.
+; break	 none.
+	.export	dbg_wai_snd_emp
+dbg_wai_snd_emp:
+	push	r0	;!
+	push	r1	;!!
+	sts.l	pr,@-sp	;!!!
+dbg_wai_snd_emp_0
+	mov.l	#SCSCR2,r1
+	mov.w	@r1,r0
+	tst	#B'10000000,r0
+	bt	dbg_wai_snd_emp_2	; send buffer empty !
+	bsr	dbg_sci_lop
+	nop
+	;
+	bf	dbg_wai_snd_emp_1	; txd !
+	bsr	put_rxd_buf
+	nop
+	;
+	bra	dbg_wai_snd_emp_0
+	nop
+	;
+dbg_wai_snd_emp_1
+	bsr	snd_txd_buf
+	nop
+	;
+	bra	dbg_wai_snd_emp_0
+	nop
+	;
+dbg_wai_snd_emp_2
+	lds.l	@sp+,pr	;!!!
+	pop	r1	;!!
+	rts
+	pop	r0	;!
+
+	;//////////////////////////////
+	;/// input & outpu for user ///
+	;//////////////////////////////
+
+;- debuger user get character -
+; entry	 none. (must be protect mode)
+; return T=1:ok(r0=data),0:none.
+;	 T=0 & r0<0 then monitor active
+; break	 r0
+	.export	dbg_usr_getc
+dbg_usr_getc:
+	push	r1
+	;* check *
+	mov.l	#dbg_stk_top-4,r1
+	mov.l	@r1,r0
+	mov.l	#dbg_ent,r1
+	cmp/eq	r1,r0
+	bt	dbg_usr_getc_0	; monitor not active !
+	mov	#-1,r0
+	bra	dbg_usr_getc_1
+	clrt
+	;
+dbg_usr_getc_0
+	sts.l	pr,@-sp
+	bsr	get_rxd_buf
+	nop
+	;
+	lds.l	@sp+,pr
+dbg_usr_getc_1
+	rts
+	pop	r1
+
+;- debuger user put character -
+; entry	 r0=data(>=0) (must be protect mode)
+; return T=1:ok,0:buffer full
+;	 T=0 & r0<0 then monitor active (r0&H'ff:data keep)
+; break	 r1
+	.export	dbg_usr_putc
+dbg_usr_putc:
+	push	r1
+	push	r0
+	;* check *
+	mov.l	#dbg_stk_top-4,r1
+	mov.l	@r1,r0
+	mov.l	#dbg_ent,r1
+	cmp/eq	r1,r0
+	bt	dbg_usr_putc_0	; monitor not active !
+	mov	#-1,r1
+	shll8	r1
+	or	r1,r0
+	mov.l	r0,@sp
+	bra	dbg_usr_putc_1
+	clrt
+	;
+dbg_usr_putc_0
+	mov.l	@sp,r0
+	sts.l	pr,@-sp
+	bsr	put_txd_buf
+	nop
+	;
+	lds.l	@sp+,pr
+dbg_usr_putc_1
+	pop	r0
+	rts
+	pop	r1
+
+	;//////////////////////
+	;/// input & output ///
+	;//////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+;- get character -
+; entry	 none.
+; return r0=character
+; break	 r0
+	.export	dbg_getc
+dbg_getc:
+	push	r1	;!
+	sts.l	pr,@-sp	;!!
+	bsr	dbg_get_ungetc_buf
+	nop
+	;
+	bt	dbg_getc_1
+	bsr	get_rxd_buf
+	nop
+	;
+	bt	dbg_getc_1
+dbg_getc_0
+	mov.l	#dbg_slp,r0
+	mov.l	@r0,r0
+	jsr	@r0		; sleep !
+	nop
+	;
+	bt	dbg_getc_1
+	bsr	snd_txd_buf
+	nop
+	;
+	bra	dbg_getc_0
+	nop
+	;
+dbg_getc_1
+	lds.l	@sp+,pr	;!!
+	rts
+	pop	r1	;!
+
+;- put character -
+; entry	 r0=character
+; return none.
+; break	 none.
+	.export	dbg_putc
+dbg_putc:
+	push	r1	;!
+	sts.l	pr,@-sp	;!!
+dbg_putc_0
+	bsr	put_txd_buf
+	nop
+	;
+	bt	dbg_putc_3
+	push	r0	;!!!
+dbg_putc_1
+	mov.l	#dbg_slp,r0
+	mov.l	@r0,r0
+	jsr	@r0		; sleep !
+	nop
+	;
+	bf	dbg_putc_2
+	bsr	put_rxd_buf
+	nop
+	;
+	bra	dbg_putc_1
+	nop
+	;
+dbg_putc_2
+	bsr	snd_txd_buf
+	nop
+	bra	dbg_putc_0
+	pop	r0	;!!!
+	;
+dbg_putc_3
+	lds.l	@sp+,pr	;!!
+	rts
+	pop	r1	;!
+
+;- unget character (push back) -
+; entry	 r0=push back character (0..255)
+; return none.
+; break	 r0
+dbg_ungetc:
+	push	r1	;!
+	mov.l	#ungetc_buf,r1
+	mov.w	r0,@r1
+	rts
+	pop	r1	;!
+
+;- get ungetc_buf -
+; entry	 none.
+; return T=1:ok(r0=data),0:none.
+; break	 r0,r1
+dbg_get_ungetc_buf:
+	mov.l	#ungetc_buf,r1
+	mov.w	@r1,r0
+	cmp/pz	r0
+	bf	dbg_get_ungetc_buf_0	; none !
+	swap.w	r0,r0	;!
+	or	#H'ff,r0
+	swap.b	r0,r0
+	or	#H'ff,r0
+	mov.w	r0,@r1		; set -1
+	shlr16	r0	;!
+dbg_get_ungetc_buf_0
+	rts
+	nop
+
+;- get character with echo -
+; entry	 none.
+; return r0=character
+; break	 r0
+	.export	dbg_getche
+dbg_getche:
+	sts.l	pr,@-sp
+	bsr	dbg_get_ungetc_buf
+	push	r1	;!
+	;
+	pop	r1	;!
+	bt	dbg_getche_0	; not echo !
+	bsr	dbg_getc
+	nop
+	;
+	bsr	dbg_putc
+	nop
+	;
+	cmp/eq	#H'0d,r0
+	bf	dbg_getche_0
+	bsr	dbg_putc
+	mov	#H'0a,r0
+	;
+	mov	#H'0d,r0
+dbg_getche_0
+	lds.l	@sp+,pr
+	rts
+	nop
+
+;- put strings -
+; entry	 r1=string top address(end \0)
+; return none. (r1=@(\0)+1)
+; break	 r0,r1
+	.export	dbg_puts
+dbg_puts:
+	sts.l	pr,@-sp
+dbg_puts_0
+	mov.b	@r1+,r0
+	cmp/eq	#0,r0
+	bt	dbg_puts_1	; end !
+	bsr	dbg_putc
+	nop
+	;
+	bra	dbg_puts_0	; next !
+	nop
+	;
+dbg_puts_1
+	lds.l	@sp+,pr
+	rts
+	nop
+
+;- get hex echo n -
+; entry	 r0=keta
+; return T=1:ok(r0=data,r1=last character),0:error(r0=data,r1=error character)
+; break	 r0,r1
+	.export	dbg_gethen
+dbg_gethen:
+	sts.l	pr,@-sp		;!
+	xor	r1,r1
+	push	r1		;!!
+dbg_gethen_0
+	bsr	dbg_getche
+	push	r0		;!!!
+	;
+	bsr	dbg_hex_to_bin
+	mov	r0,@(4,sp)	;!!
+	;
+	bt	dbg_gethen_3
+	bra	dbg_gethen_4
+	add	#4,sp		;!!!
+	;
+dbg_gethen_3
+	shll2	r1
+	shll2	r1
+	add	r0,r1
+	pop	r0		;!!!
+	dt	r0
+	bf	dbg_gethen_0	; next !
+dbg_gethen_4
+	mov	r1,r0
+	pop	r1		;!!
+	lds.l	@sp+,pr		;!
+	rts
+	nop
+
+;- get hex n -
+; entry	 r0=keta
+; return T=1:ok(r0=data,r1=last character),0:error(r0=data,r1=error character)
+; break	 r0,r1
+	.export	dbg_gethn
+dbg_gethn:
+	sts.l	pr,@-sp		;!
+	xor	r1,r1
+	push	r1		;!!
+dbg_gethn_0
+	bsr	dbg_getc
+	push	r0		;!!!
+	;
+	bsr	dbg_hex_to_bin
+	mov	r0,@(4,sp)	;!!
+	;
+	bt	dbg_gethn_3
+	bra	dbg_gethn_4
+	add	#4,sp		;!!!
+	;
+dbg_gethn_3
+	shll2	r1
+	shll2	r1
+	add	r0,r1
+	pop	r0		;!!!
+	dt	r0
+	bf	dbg_gethn_0	; next !
+dbg_gethn_4
+	mov	r1,r0
+	pop	r1		;!!
+	lds.l	@sp+,pr		;!
+	rts
+	nop
+
+;- hex character to binary -
+; entry	 r0=character data
+; return T=1:ok(r0=data),0:error
+; break	 r0
+	.export	dbg_hex_to_bin
+dbg_hex_to_bin:
+	add	#-"0",r0
+	cmp/pz	r0
+	bf	dbg_hex_to_bin_1	; error !
+	add	#-"9"+"0",r0
+	cmp/pl	r0
+	bf	dbg_hex_to_bin_3	; 0..9(-9..0) !
+	add	#-"A"+"9",r0
+	cmp/pz	r0
+	bf	dbg_hex_to_bin_1	; error !
+	add	#-"F"+"A",r0
+	cmp/pl	r0
+	bf	dbg_hex_to_bin_2	; A..F(-5..0) !
+	add	#-"a"+"F",r0
+	cmp/pz	r0
+	bf	dbg_hex_to_bin_1	; error !
+	add	#-"f"+"a",r0
+	cmp/pl	r0
+	bf	dbg_hex_to_bin_2	; a..f(-5..0) !
+	bra	dbg_hex_to_bin_1	; error !
+	clrt
+	;
+dbg_hex_to_bin_2
+	add	#"F"-"A"+10-("9"-"0"),r0
+dbg_hex_to_bin_3
+	add	#"9"-"0",r0
+	sett
+dbg_hex_to_bin_1
+	rts
+	nop
+
+;- put hex 1 -
+; entry	 r0=data(lsb 4bit)
+; return none.
+; break	 r0
+	.export	dbg_puth1
+;- put hex n -
+; entry	 r0=data
+;	 r1=keta(1..8)
+; return none.
+; break	 r0,r1
+	.export	dbg_puthn
+dbg_puthn:
+	sts.l	pr,@-sp	;!
+	xor	r0,r1
+	xor	r1,r0
+	xor	r0,r1
+	add	#-8,r0	;1..8 -> -7..0
+	neg	r0,r0	;-7..0 -> 7..0
+	and	#7,r0
+	shll2	r0
+	braf	r0
+	shld	r0,r1
+	;
+	bsr	dbg_puthn_0
+	nop
+	;
+	bsr	dbg_puthn_0
+	nop
+	;
+	bsr	dbg_puthn_0
+	nop
+	;
+	bsr	dbg_puthn_0
+	nop
+	;
+	bsr	dbg_puthn_0
+	nop
+	;
+	bsr	dbg_puthn_0
+	nop
+	;
+	bsr	dbg_puthn_0
+	nop
+	;
+	bsr	dbg_puthn_0
+	nop
+	;
+	lds.l	@sp+,pr	;!
+	rts
+	nop
+	;
+dbg_puthn_0
+	rotl	r1
+	rotl	r1
+	rotl	r1
+	rotl	r1
+	mov	r1,r0
+dbg_puth1
+	and	#H'f,r0
+	add	#-10,r0
+	cmp/pz	r0
+	bf	dbg_puthn_1	; 0..9(-10..-1) !
+	add	#"A"-(10+"0"),r0
+dbg_puthn_1
+	bra	dbg_putc
+	add	#10+"0",r0
+
+;- scan format -
+; entry	 r1=format string top address
+;	 format (%x:1..8hex,%nx:n=1..8fixed hex,%%:%,\r:CR=H'0d,\\:\)
+; return T=1:ok(r0=1st,r1=2nd,@sp=3rd,@sp+4=4th,...),0:ng
+; break	 r0,r1
+	.export	dbg_scanf
+dbg_scanf:
+	add	#-8,sp		;!,!!
+	mov	sp,r0		; parameter save top
+	sts.l	pr,@-sp		;!!!
+	push	r0		;!!!!(save point)
+dbg_scanf_0
+	mov.b	@r1+,r0
+	cmp/eq	#0,r0
+	bt	dbg_scanf_3	; end !
+	cmp/eq	#"%",r0
+	bt	dbg_scanf_per	; percent character !
+	cmp/eq	#"\",r0
+	bt	dbg_scanf_yen	; yen character !
+dbg_scanf_1
+	push	r1		;!!!!!
+	bsr	dbg_getche
+	mov	r0,r1
+	;
+	cmp/eq	r1,r0
+	pop	r1		;!!!!!
+	bt	dbg_scanf_0	; next !
+dbg_scanf_3
+	add	#4,sp		;!!!!
+	lds.l	@sp+,pr		;!!!
+	pop	r0		;!!
+	rts
+	pop	r1		;!
+	;
+dbg_scanf_per
+	mov.b	@r1+,r0
+	cmp/eq	#"%",r0
+	bt	dbg_scanf_1	; "%%" !
+	cmp/eq	#"x",r0
+	bt	dbg_scanf_per_0
+	add	#-"1",r0	; "1"... -> 0...
+	cmp/pz	r0
+	bf	dbg_scanf_3	; unknown !
+	add	#-(8-1),r0	; 0... -> -7,-6,-5,-4,-3,-2,-1,0,1...
+	cmp/pl	r0
+	bf	dbg_scanf_per_1
+	bra	dbg_scanf_3	; unknown !
+	clrt
+	;
+	;* %x *
+dbg_scanf_per_0
+	mov	#8,r0
+	bsr	dbg_gethen
+	push	r1		;!!!!!
+	;
+	bt	dbg_scanf_per_2	; ok !
+	xor	r1,r0
+	xor	r0,r1
+	bsr	dbg_ungetc
+	xor	r1,r0
+	;
+	mov	r1,r0
+	bra	dbg_scanf_per_2
+	sett
+	;
+	;* %nx *
+dbg_scanf_per_1
+	add	#8,r0		; -7..0 -> 1..8
+	push	r1		;!!!!!
+	xor	r0,r1
+	xor	r1,r0
+	xor	r0,r1
+	mov.b	@r0,r0
+	cmp/eq	#"x",r0
+	bt	dbg_scanf_per_1a
+	bra	dbg_scanf_3	; unknown !
+	pop	r1		;!!!!!
+	;
+dbg_scanf_per_1a
+	mov	@sp,r0		;!!!!!
+	add	#1,r0
+	mov	r0,@sp		;!!!!!
+	bsr	dbg_gethen
+	mov	r1,r0
+	;
+dbg_scanf_per_2
+	mov.l	@(4,sp),r1	;!!!!
+	mov.l	r0,@r1
+	add	#4,r1
+	mov.l	r1,@(4,sp)	;!!!!
+	pop	r1		;!!!!!
+	bf	dbg_scanf_3	; error !
+	bra	dbg_scanf_0	; ok !
+	nop
+	;
+dbg_scanf_yen
+	mov.b	@r1+,r0
+	cmp/eq	#"\",r0
+	bt	dbg_scanf_1	; "\\" !
+	cmp/eq	#"r",r0
+	bt	dbg_scanf_yen_0	; "\r" !
+	bra	dbg_scanf_3	; unknown !
+	nop
+dbg_scanf_yen_0
+	bra	dbg_scanf_1
+	mov	#H'0d,r0	; "\r" -> H'0d
+
+	;///////////////
+	;/// debuger ///
+	;///////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_snd:
+	bsr	snd_txd_buf
+	nop
+	;
+dbg_nxt:
+	mov.l	#dbg_slp,r0
+	mov.l	@r0,r0
+	jsr	@r0		; sleep !
+	nop
+	;
+dbg_ent:
+	bf	dbg_snd		; not rxd !
+	cmp/eq	#"@",r0
+	bt	dbg_ent_0	; debug mode in !
+	bsr	put_rxd_buf
+	nop
+	;
+	bra	dbg_nxt
+	nop
+	;
+dbg_ent_0
+	;* rxd buffer clear *
+	mov.l	#rxd_buf_str,r1
+	mov	#0,r0
+	mov.b	r0,@(buf_act,r1)
+	add	#ungetc_buf-rxd_buf_str,r1
+	mov	#-1,r0
+	mov.w	r0,@r1
+	;* send message *
+	mov.l	#dbg_entry_msg_crlf,r1
+dbg_ent_1
+	bsr	dbg_puts
+	nop
+	;
+	;* prompt *
+dbg_ent_2
+	mov.l	#dbg_cmd,r1
+	mov.l	@r1,r1
+	bsr	dbg_puts	; prompt
+	add	#-4,r1
+	;
+	;* decode *
+dbg_dec
+	bsr	dbg_getche
+	nop
+	;
+	push	r2	;!
+	mov	r0,r2
+dbg_dec_0
+	mov.l	@r1+,r0
+	cmp/eq	#0,r0
+	bt	dbg_dec_1	; end !
+	cmp/eq	r0,r2
+	bt	dbg_dec_3	; go !
+	neg	r0,r0
+	cmp/eq	r0,r2
+	bt	dbg_dec_2	; link !
+	bra	dbg_dec_0
+	add	#4,r1
+	;
+	;* miss match *
+dbg_dec_1
+	pop	r2	;!
+	mov.l	#dbg_miss_msg,r1
+	bra	dbg_ent_1
+	nop
+	;
+	;* link *
+dbg_dec_2
+	pop	r2	;!
+	bra	dbg_dec
+	mov.l	@r1,r1
+	;
+	;* matchi *
+dbg_dec_3
+	pop	r2	;!
+	mov.l	@r1,r1
+	jsr	@r1
+	nop
+	;
+	bt	dbg_ent_2	; ok !
+	;* ng *
+	mov.l	#dbg_miss_msg,r1
+	bra	dbg_ent_1
+	nop
+
+	;////////////
+	;/// exit ///
+	;////////////
+
+dbg_exit:
+	mov.l	#dbg_exit_msg,r1
+	bsr	dbg_puts
+	nop
+	;
+	bra	dbg_nxt
+	nop
+
+	;/////////////////////
+	;/// command table ///
+	;/////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.macro	CMD_TBL	code, addr
+	.data.l	\code, \addr
+	.endm
+
+	.macro	LNK_TBL	code, addr
+	.data.l	-\code, \addr
+	.endm
+
+	.export	dbg_cmd_top
+	.import	dbg_reset
+
+	.data.b	H'0d,H'0a,"*",0	; prompt
+dbg_cmd_top
+	CMD_TBL	<"@">, dbg_exit
+	LNK_TBL	<"C">, dbg_cmd_C
+	LNK_TBL	<"D">, dbg_cmd_D
+	LNK_TBL	<"I">, dbg_cmd_I
+	LNK_TBL	<"L">, dbg_cmd_L
+	LNK_TBL	<"?">, dbg_cmd_Q
+	CMD_TBL	<"R">, dbg_reset
+	LNK_TBL	<"W">, dbg_cmd_W
+	.data.l	0	; end
+
+	.import	dbg_chn_mem, dbg_chn_msz
+dbg_cmd_C
+	CMD_TBL	<"M">, dbg_chn_mem
+	CMD_TBL	<"S">, dbg_chn_msz
+	.data.l	0	; end
+
+	.import	dbg_dmp_mem, dbg_dmp_siz, dbg_dis_asm, dbg_dmp_wch
+dbg_cmd_D
+	CMD_TBL	<"A">, dbg_dis_asm
+	LNK_TBL	<"I">, dbg_cmd_DI
+	CMD_TBL	<"M">, dbg_dmp_mem
+	CMD_TBL	<"S">, dbg_dmp_siz
+	CMD_TBL	<"W">, dbg_dmp_wch
+	.data.l	0	; end
+
+	.import	dbg_ini_mem
+dbg_cmd_I
+	CMD_TBL	<"M">, dbg_ini_mem
+	.data.l	0	; end
+
+	.import	dbg_lod_sfo
+dbg_cmd_L
+	CMD_TBL	<"S">, dbg_lod_sfo
+	.data.l	0	; end
+
+	.import	dbg_hlp_dsp
+dbg_cmd_Q
+	CMD_TBL	<H'0d>, dbg_hlp_dsp
+	.data.l	0	; end
+
+	.import	dbg_wri_fla, dbg_wrf_rst, dbg_wch_siz
+dbg_cmd_W
+	CMD_TBL	<"F">, dbg_wri_fla
+	CMD_TBL	<"R">, dbg_wrf_rst
+	CMD_TBL	<"S">, dbg_wch_siz
+	.data.l	0	; end
+
+	.import	dbg_sta
+dbg_cmd_DI
+	CMD_TBL	<H'0d>, dbg_sta
+	.data.l	0	; end
+
+	.export	dbg_cmd2_top
+
+	.data.b	H'0d,H'0a,">",0	; prompt
+dbg_cmd2_top
+	LNK_TBL	<"_">, dbg_cmd2__
+	LNK_TBL	<"C">, dbg_cmd2_C
+	LNK_TBL	<"D">, dbg_cmd2_D
+	LNK_TBL	<"G">, dbg_cmd2_G
+	LNK_TBL	<"I">, dbg_cmd2_I
+	LNK_TBL	<"L">, dbg_cmd2_L
+	LNK_TBL	<"P">, dbg_cmd2_P
+	LNK_TBL	<"?">, dbg_cmd2_Q
+	CMD_TBL	<"R">, dbg_reset
+	LNK_TBL	<"S">, dbg_cmd2_S
+	LNK_TBL	<"T">, dbg_cmd2_T
+	LNK_TBL	<"V">, dbg_cmd2_V
+	LNK_TBL	<"W">, dbg_cmd2_W
+	.data.l	0	; end
+
+dbg_cmd2__
+	LNK_TBL	<"P">, dbg_cmd2__P
+	.data.l	0	; end
+
+	.import	dbg_chn_reg
+dbg_cmd2_C
+	CMD_TBL	<"M">, dbg_chn_mem
+	CMD_TBL	<"R">, dbg_chn_reg
+	CMD_TBL	<"S">, dbg_chn_msz
+	.data.l	0	; end
+
+dbg_cmd2_D
+	CMD_TBL	<"A">, dbg_dis_asm
+	LNK_TBL	<"F">, dbg_cmd2_DF
+	LNK_TBL	<"I">, dbg_cmd2_DI
+	CMD_TBL	<"M">, dbg_dmp_mem
+	LNK_TBL	<"O">, dbg_cmd2_DO
+	LNK_TBL	<"R">, dbg_cmd2_DR
+	CMD_TBL	<"S">, dbg_dmp_siz
+	.data.l	0	; end
+
+	.import	dbg_brk_run
+dbg_cmd2_G
+	CMD_TBL	<H'0d>, dbg_brk_run
+	.data.l	0	; end
+
+dbg_cmd2_I
+	CMD_TBL	<"M">, dbg_ini_mem
+	.data.l	0	; end
+
+dbg_cmd2_L
+	CMD_TBL	<"S">, dbg_lod_sfo
+	.data.l	0	; end
+
+	.import	dbg_pcb_set
+dbg_cmd2_P
+	CMD_TBL	<"B">, dbg_pcb_set
+	.data.l	0	; end
+
+	.import	dbg_hlp_dsp2
+dbg_cmd2_Q
+	CMD_TBL	<H'0d>, dbg_hlp_dsp2
+	LNK_TBL	<"P">, dbg_cmd2_QP
+	.data.l	0	; end
+
+	.import	dbg_ste_run, dbg_ste_one
+dbg_cmd2_S
+	CMD_TBL	<H'0d>, dbg_ste_one
+	CMD_TBL	<"T">, dbg_ste_run
+	.data.l	0	; end
+
+	.import	dbg_trc_run, dbg_trc_one
+dbg_cmd2_T
+	CMD_TBL	<H'0d>, dbg_trc_one
+	CMD_TBL	<"R">, dbg_trc_run
+	.data.l	0	; end
+
+	.import	dbg_vew_lst, dbg_vew_trc, dbg_vew_ste
+dbg_cmd2_V
+	CMD_TBL	<"L">, dbg_vew_lst
+	CMD_TBL	<"S">, dbg_vew_ste
+	CMD_TBL	<"T">, dbg_vew_trc
+	.data.l	0	; end
+
+dbg_cmd2_W
+	CMD_TBL	<"F">, dbg_wri_fla
+	CMD_TBL	<"R">, dbg_wrf_rst
+	.data.l	0	; end
+
+dbg_cmd2__P
+	LNK_TBL	<"B">, dbg_cmd2__PB
+	.data.l	0	; end
+
+	.import	dbg_dmp_frg
+dbg_cmd2_DF
+	CMD_TBL	<H'0d>, dbg_dmp_frg
+	.data.l	0	; end
+
+	.import	dbg_dmp_rip
+dbg_cmd2_DI
+	CMD_TBL	<H'0d>, dbg_dmp_rip
+	.data.l	0	; end
+
+	.import	dbg_stp
+dbg_cmd2_DO
+	CMD_TBL	<H'0d>, dbg_stp
+	.data.l	0	; end
+
+	.import	dbg_dmp_reg
+dbg_cmd2_DR
+	CMD_TBL	<H'0d>, dbg_dmp_reg
+	.data.l	0	; end
+
+dbg_cmd2_QP
+	LNK_TBL	<"B">, dbg_cmd2_QPB
+	.data.l	0	; end
+
+	.import	dbg_pcb_clr
+dbg_cmd2__PB
+	CMD_TBL	<H'0d>, dbg_pcb_clr
+	.data.l	0	; end
+
+	.import	dbg_pcb_dsp
+dbg_cmd2_QPB
+	CMD_TBL	<H'0d>, dbg_pcb_dsp
+	.data.l	0	; end
+
+	.export	dbg_entry_msg, dbg_entry_msg_crlf
+dbg_entry_msg_crlf
+ .sdata	<H'0d><H'0a>
+dbg_entry_msg
+ .sdataz "*** DEBUGER for SH4 Ver.0.11 Copyright (C) 2001,2002 by AKIYA ***"
+dbg_exit_msg
+ .sdataz <H'0d><H'0a>"*** Exit ***"<H'0d><H'0a>
+dbg_miss_msg
+ .sdataz <H'0d><H'0a>"?"
+
+	;////////////////////////
+	;/// buffer structure ///
+	;////////////////////////
+
+BUF_SIZ	.equ	32	; must be 2^n (n:0,1,2,3,4,5,6)
+
+	.section	BUF, DUMMY, ALIGN=4
+	.org	0
+buf_act	.res.b	1
+buf_wrp	.res.b	1
+buf_top	.res.b	BUF_SIZ
+buf_siz	.equ	(($+3)/4)*4
+
+	;//////////////////
+	;/// debug work ///
+	;//////////////////
+
+	.section	DBG_B1, DATA, ALIGN=8
+
+	.export	dbg_cmd, dbg_slp, dbg_usp, dbg_brk	; for debuger mode
+
+dbg_wrk_head
+dbg_usp	.res.l	1
+dbg_sp	.res.l	1
+dbg_slp	.res.l	1
+dbg_cmd	.res.l	1
+dbg_stk	.res.b	256-(dbg_stk-dbg_usp)
+dbg_stk_top
+dbg_brk	.res.l	1
+txd_buf_str	.res.b	buf_siz
+rxd_buf_str	.res.b	buf_siz
+ungetc_buf	.res.w	1
+dbg_wrk_fit	.res.b	4-((dbg_wrk_fit-dbg_wrk_head)&3) ; must be x4byte size
+dbg_wrk_tail
+
+	.end
+

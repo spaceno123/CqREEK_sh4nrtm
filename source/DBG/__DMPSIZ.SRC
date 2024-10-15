@@ -1,0 +1,180 @@
+;
+;	Program	__DMPSIZ.SRC
+;	Date	2001/1/24 .. 2001/1/29
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/2/18	modify section offset
+; 2001/3/28	add import function
+; 2001/9/22	modify branch -> branch, filename
+; 2001/11/12	add export dbg_dmp_siz_hex for dbg_wch_siz
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf, dbg_chk_rxd_buf, dbg_puthn
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_chk_rxd_buf_sub
+	branch	dbg_chk_rxd_buf
+
+dbg_puthn_sub
+	branch	dbg_puthn
+
+	;////////////////////////
+	;/// dump memory size ///
+	;////////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_dmp_siz
+dbg_dmp_siz:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_dmp_siz_scn,r1
+	bsr	dbg_scanf_sub
+	add	#-4,sp		;!
+	;
+	bf	dbg_dmp_siz_3	; error !
+	tst	r1,r1
+	bt	dbg_dmp_siz_2	; size zero !
+	add	r0,r1
+	add	#-1,r1		; r0=start, r1=end
+	push	r0
+	mov.l	@(4,sp),r0
+	cmp/eq	#0,r0
+	pop	r0
+	bt	dbg_dmp_siz_2	; wide zero !
+dbg_dmp_siz_0
+	bsr	dbg_dmp_siz_hex
+	nop
+	;
+	bf	dbg_dmp_siz_1	; end !
+	bsr	dbg_chk_rxd_buf_sub	;<ent> noen. <ret> T=1:data in
+	push	r0		;!!
+	;
+	pop	r0		;!!
+	bt	dbg_dmp_siz_3	; break !
+	push	r1		;!!
+	mov	r0,r1
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	mov.l	@(4,sp),r0	;!
+	add	r1,r0
+	bra	dbg_dmp_siz_0
+	pop	r1		;!!
+	;
+dbg_dmp_siz_1
+	bra	dbg_dmp_siz_3
+	sett
+	;
+dbg_dmp_siz_2
+	clrt
+dbg_dmp_siz_3
+	add	#4,sp		;!
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_dmp_siz_scn
+	.sdataz	"%x,%x,%x\r"
+	.align	8
+
+;- dump memory size hex -
+; entry	 r0=start address
+;	 r1=end address
+;	 @sp=wide
+; return T=1:not end,0:end
+	.export	dbg_dmp_siz_hex
+dbg_dmp_siz_hex:
+	push	r0	;!
+	sts.l	pr,@-sp	;!!
+	push	r1	;!!!
+	push	r0	;!!!!
+	bsr	dbg_puthn_sub	; address
+	mov	#8,r1
+	;
+	bsr	dbg_putc_sub	; space
+	mov	#" ",r0
+	;
+	mov	#0,r1
+dbg_dmp_siz_hex_0
+	tst	r1,r1
+	bt	dbg_dmp_siz_hex_2
+	mov	r1,r0
+	and	#31,r0
+	cmp/eq	#0,r0
+	bf	dbg_dmp_siz_hex_2
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	push	r1	;!!!!!
+	mov	#9,r1
+dbg_dmp_siz_hex_1
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+	dt	r1
+	bf	dbg_dmp_siz_hex_1
+	pop	r1	;!!!!!
+dbg_dmp_siz_hex_2
+	mov	r1,r0
+	and	#7,r0
+	cmp/eq	#0,r0
+	bf	dbg_dmp_siz_hex_3
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+dbg_dmp_siz_hex_3
+	push	r1	;!!!!!
+	mov.l	@(4,sp),r1
+	mov.b	@r1,r0
+	bsr	dbg_puthn_sub
+	mov	#2,r1
+	;
+	mov.l	@(4,sp),r1
+	mov.l	@(8,sp),r0
+	cmp/eq	r0,r1
+	bt	dbg_dmp_siz_hex_4
+	add	#1,r1
+	mov.l	r1,@(4,sp)
+	pop	r1	;!!!!!
+	add	#1,r1
+	mov.l	@(16,sp),r0
+	cmp/hs	r0,r1
+	bf	dbg_dmp_siz_hex_0
+	bra	dbg_dmp_siz_hex_5
+	nop
+	;
+dbg_dmp_siz_hex_4
+	clrt
+	add	#4,sp	;!!!!!
+dbg_dmp_siz_hex_5
+	add	#4,sp	;!!!!
+	pop	r1	;!!!
+	lds.l	@sp+,pr	;!!
+	rts
+	pop	r0	;!
+
+	.end
+

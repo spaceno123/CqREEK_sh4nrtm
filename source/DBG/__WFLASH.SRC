@@ -1,0 +1,516 @@
+;
+;	Program	__WFLASH.SRC
+;	Date	2001/2/18 .. 2001/2/20
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/2/26	flash command address modify
+; 2001/3/6	add write flash with reset
+; 2001/3/7	write check modify
+; 2001/3/13	add bus control
+; 2001/3/15	bus control disable, wait send buffer empty
+; 2001/3/28	add import function
+; 2001/9/22	modify jump -> branch, filename
+; 2002/6/1	no copy for running on ram
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf, dbg_wai_snd_emp, dbg_puts
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_wai_snd_emp_sub
+	branch	dbg_wai_snd_emp
+
+dbg_puts_sub
+	branch	dbg_puts
+
+	;///////////////////
+	;/// write flash ///
+	;///////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_wri_fla
+dbg_wri_fla:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+ .aif 1 EQ 0
+	;* bus control *
+	mov.l	#WCR1,r1
+	mov.l	@r1,r0
+	push	r0	;!
+	or	#H'07,r0
+	mov.l	r0,@r1
+	mov.l	#WCR2,r1
+	mov.l	@r1,r0
+	push	r0	;!!
+	or	#H'3f,r0
+	mov.l	r0,@r1
+	mov.l	#WCR3,r1
+	mov.l	@r1,r0
+	push	r0	;!!!
+	or	#H'07,r0
+	mov.l	r0,@r1
+ .aendi
+ .aif 1 EQ 0							;- 2002/6/1 ..
+	;* copy *
+	push	r2
+	push	r3
+	mov.l	#dbg_fla_fnc_top,r1
+	mov.l	#dbg_fla_wrk,r2
+	mov.l	#dbg_fla_fnc_end-dbg_fla_fnc_top,r3
+dbg_wri_fla_0
+	mov.b	@r1+,r0
+	mov.b	r0,@r2
+	add	#1,r2
+	dt	r3
+	bf	dbg_wri_fla_0
+	pop	r3
+	pop	r2
+ .aendi								;.. - 2002/6/1
+	;* get parameta *
+	mov.l	#dbg_wri_fla_scn,r1
+	bsr	dbg_scanf_sub
+	add	#-4,sp		;!
+	;
+	bsr	dbg_wai_snd_emp_sub
+	nop
+	;
+	;* execute *
+	push	r3		;!!
+	mov.l	@(4,sp),r3	;r3=size
+	mov.l	r2,@(4,sp)	;!
+	mov	r0,r2		;r2=source
+	bf	dbg_wri_fla_2	; error !
+	;* BL=1 *
+	stc	sr,r0
+	swap.w	r0,r0
+	swap.b	r0,r0
+	or	#B'00010000,r0	; BL=1
+	swap.b	r0,r0
+	swap.w	r0,r0
+	ldc	r0,sr
+	;* size check *
+	mov	r3,r0
+	tst	#1,r0
+	bf	dbg_wri_fla_2	; size error (bit0=1) !
+	cmp/eq	#0,r0
+	bt	dbg_wri_fla_2	; size zero !
+ .aif 1 EQ 0							;* 2002/6/1 ..
+	mov.l	#dbg_fla_wrk,r3
+	jsr	@r3
+	nop
+ .aelse
+	bsr	dbg_era_wri_fla_fnc
+	nop
+ .aendi								;.. * 2002/6/1
+	;
+dbg_wri_fla_2
+	;* BL=0 *
+	stc	sr,r0
+	swap.w	r0,r0
+	swap.b	r0,r0
+	not	r0,r0
+	or	#B'00010000,r0	; BL=0
+	not	r0,r0
+	swap.b	r0,r0
+	swap.w	r0,r0
+	ldc	r0,sr
+	pop	r3	;!!
+	pop	r2	;!
+ .aif 1 EQ 0
+	;* bus restore *
+	mov.l	#WCR3,r1
+	pop	r0	;!!!
+	mov.l	r0,@r1
+	mov.l	#WCR2,r1
+	pop	r0	;!!
+	mov.l	r0,@r1
+	mov.l	#WCR1,r1
+	pop	r0	;!
+	mov.l	r0,@r1
+ .aendi
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_wri_fla_scn
+	.sdataz	"%x,%x,%x\r"
+	.align	8
+
+	;//////////////////////////////
+	;/// write flash with reset ///
+	;//////////////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_wrf_rst
+dbg_wrf_rst:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+ .aif 1 EQ 0
+	;* bus control *
+	mov.l	#WCR1,r1
+	mov.l	@r1,r0
+	push	r0	;!
+	or	#H'07,r0
+	mov.l	r0,@r1
+	mov.l	#WCR2,r1
+	mov.l	@r1,r0
+	push	r0	;!!
+	or	#H'3f,r0
+	mov.l	r0,@r1
+	mov.l	#WCR3,r1
+	mov.l	@r1,r0
+	push	r0	;!!!
+	or	#H'07,r0
+	mov.l	r0,@r1
+ .aendi
+ .aif 1 EQ 0							;- 2002/6/1 ..
+	;* copy *
+	push	r2
+	push	r3
+	mov.l	#dbg_fla_fnc_top,r1
+	mov.l	#dbg_fla_wrk,r2
+	mov.l	#dbg_fla_fnc_end-dbg_fla_fnc_top,r3
+dbg_wrf_rst_0
+	mov.b	@r1+,r0
+	mov.b	r0,@r2
+	add	#1,r2
+	dt	r3
+	bf	dbg_wrf_rst_0
+	pop	r3
+	pop	r2
+ .aendi								;.. - 2002/6/1
+	;* get parameta *
+	mov.l	#dbg_wrf_rst_scn,r1
+	bsr	dbg_scanf_sub
+	add	#-4,sp		;!
+	;
+	bsr	dbg_wai_snd_emp_sub
+	nop
+	;
+	;* execute *
+	push	r3		;!!
+	mov.l	@(4,sp),r3	;r3=size
+	mov.l	r2,@(4,sp)
+	mov	r0,r2		;r2=source
+	bf	dbg_wrf_rst_2	; error !
+	;* BL=1 *
+	stc	sr,r0
+	swap.w	r0,r0
+	swap.b	r0,r0
+	or	#B'00010000,r0	; BL=1
+	swap.b	r0,r0
+	swap.w	r0,r0
+	ldc	r0,sr
+	;* size check *
+	mov	r3,r0
+	tst	#1,r0
+	bf	dbg_wrf_rst_2	; size error (bit0=1) !
+	cmp/eq	#0,r0
+	bt	dbg_wrf_rst_2	; size zero !
+ .aif 1 EQ 0							;* 2002/6/1 ..
+	mov.l	#dbg_fla_wrk+(dbg_era_wri_fla_rst_fnc-dbg_era_wri_fla_fnc),r3
+	jsr	@r3
+	nop
+ .aelse
+	bsr	dbg_era_wri_fla_rst_fnc
+	nop
+ .aendi								;.. * 2002/6/1
+	;
+dbg_wrf_rst_2
+	;* BL=0 *
+	stc	sr,r0
+	swap.w	r0,r0
+	swap.b	r0,r0
+	not	r0,r0
+	or	#B'00010000,r0	; BL=0
+	not	r0,r0
+	swap.b	r0,r0
+	swap.w	r0,r0
+	ldc	r0,sr
+	pop	r3	;!!
+	pop	r2	;!
+ .aif 1 EQ 0
+	;* bus restore *
+	mov.l	#WCR3,r1
+	pop	r0	;!!!
+	mov.l	r0,@r1
+	mov.l	#WCR2,r1
+	pop	r0	;!!
+	mov.l	r0,@r1
+	mov.l	#WCR1,r1
+	pop	r0	;!
+	mov.l	r0,@r1
+ .aendi
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_wrf_rst_scn
+	.sdataz	"%x,%x,%x\r"
+	.align	8
+
+	;/////////////
+	;/// reset ///
+	;/////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_reset
+dbg_reset:
+	sts.l	pr,@-sp
+	mov.l	#dbg_reset_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_reset_0	; error !
+	mov.l	#dbg_reset_msg,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	bsr	dbg_wai_snd_emp_sub
+	nop
+	;
+	bra	dbg_sys_res_fnc
+	nop
+	;
+dbg_reset_0
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_reset_scn
+	.sdataz	"eset\r"
+dbg_reset_msg
+	.sdataz	"::: RESET :::"<H'0d><H'0a>
+	.align	8
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+ .aif 1 EQ 0							;- 2002/6/1 ..
+dbg_fla_fnc_top	;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+ .aendi								;.. - 2002/6/1
+
+;- erase write flash function -
+; entry	 r0=size
+;	 r1=flash address
+;	 r2=source address
+; return none.
+; break	 r0,r1,r2
+dbg_era_wri_fla_fnc:
+	sts.l	pr,@-sp
+	push	r0
+	push	r1
+	;* erase check *
+dbg_era_wri_fla_fnc_0
+	push	r0
+dbg_era_wri_fla_fnc_1
+	mov.w	@r1+,r0
+	add	#1,r0
+	cmp/eq	#0,r0
+	bt	dbg_era_wri_fla_fnc_2
+	;* erase *
+	bsr	dbg_era_fla_fnc	; block erase <ent>r1=flash address
+	add	#-2,r1
+	;
+	bra	dbg_era_wri_fla_fnc_1
+	nop
+	;
+dbg_era_wri_fla_fnc_2
+	pop	r0
+	add	#-2,r0
+	cmp/eq	#0,r0
+	bf	dbg_era_wri_fla_fnc_0
+	;* write *
+	pop	r1
+dbg_era_wri_fla_fnc_3
+	bsr	dbg_wri_fla_fnc	; word wite <ent>r0=data,r1=flash address
+	mov.w	@r2+,r0
+	;
+	bf	dbg_era_wri_fla_fnc_4	; error !
+	add	#2,r1
+	pop	r0
+	add	#-2,r0
+	cmp/eq	#0,r0
+	bf/s	dbg_era_wri_fla_fnc_3
+	push	r0
+	;
+	add	#4,sp
+dbg_era_wri_fla_fnc_4
+	lds.l	@sp+,pr
+	rts
+	nop
+
+ADR5555		.equ	(H'5555*2)	; B'1010 1010 1010 1010 (AAAA)
+;ADR2AAA	.equ	(H'2aaa*2)	; B'0101 0101 0101 0100 (5554)
+
+;- erase flash function -
+; entry	 r1=erase address (H'???*****)
+; return T=1:ok,0:ng
+; break	 none.
+dbg_era_fla_fnc:
+	push	r0
+	push	r1
+	push	r2
+	;* make address *
+	mov	#H'10,r0	;r0=H'00000010
+	swap.w	r0,r0		;r0=H'00100000
+	add	#-1,r0		;r0=H'000fffff
+	not	r0,r0		;r0=H'fff00000
+	and	r0,r1		;r1=H'???00000
+	mov	#ADR5555/512,r0	;r0=H'00000055
+	shll	r0		;r0=H'000000aa
+	swap.b	r0,r0		;r0=H'0000aa00
+	or	#ADR5555&255,r0	;r0=H'0000aaaa
+	or	r0,r1		;r1=H'???0aaaa
+	mov	#1,r2		;r2=H'00000001
+	swap.w	r2,r2		;r2=H'00010000
+	add	#-2,r2		;r2=H'0000fffe
+	;* command *
+	mov	#H'aa,r0
+	mov.w	r0,@r1		;r1=H'???0aaaa
+	xor	r2,r1
+	mov	#H'55,r0
+	mov.w	r0,@r1		;r1=H'???05554
+	xor	r2,r1
+	mov	#H'80,r0
+	mov.w	r0,@r1		;r1=H'???0aaaa
+	mov	#H'aa,r0
+	mov.w	r0,@r1		;r1=H'???0aaaa
+	xor	r2,r1
+	mov	#H'55,r0
+	mov.w	r0,@r1		;r1=H'???05554
+	pop	r2
+	pop	r1
+	mov	#H'30,r0
+	mov.w	r0,@r1		;r1=H'???*****
+	;* end check (bit7=1) *
+dbg_era_fnc_fla_0
+	mov.w	@r1,r0
+	tst	#B'10000000,r0
+	bf	dbg_era_fnc_fla_1	; bit7=1 ok !
+	tst	#B'00100000,r0
+	bt	dbg_era_fnc_fla_0	; bit5=0 check !
+	mov.w	@r1,r0
+	tst	#B'10000000,r0
+	bf	dbg_era_fnc_fla_1	; bit7=1 ok !
+	bra	dbg_era_fnc_fla_2
+	clrt
+	;
+dbg_era_fnc_fla_1
+	sett
+dbg_era_fnc_fla_2
+	rts
+	pop	r0
+
+;- write flash function -
+; entry	 r0=data(word)
+;	 r1=address (H'???*****)
+; return T=1:ok,0:ng
+; break	 none.
+dbg_wri_fla_fnc:
+	push	r0
+	exts.w	r0,r0
+	cmp/eq	#-1,r0
+	bt	dbg_wri_fla_fnc_1	; H'ffff then write skip !
+	push	r1
+	push	r2
+	;* make address *
+	mov	#H'10,r0	;r0=H'00000010
+	swap.w	r0,r0		;r0=H'00100000
+	add	#-1,r0		;r0=H'000fffff
+	not	r0,r0		;r0=H'fff00000
+	and	r0,r1		;r1=H'???00000
+	mov	#ADR5555/512,r0	;r0=H'00000055
+	shll	r0		;r0=H'000000aa
+	swap.b	r0,r0		;r0=H'0000aa00
+	or	#ADR5555&255,r0	;r0=H'0000aaaa
+	or	r0,r1		;r1=H'???0aaaa
+	mov	#1,r2		;r2=H'00000001
+	swap.w	r2,r2		;r2=H'00010000
+	add	#-2,r2		;r2=H'0000fffe
+	;* command *
+	mov	#H'aa,r0
+	mov.w	r0,@r1		;r1=H'???0aaaa
+	xor	r2,r1
+	mov	#H'55,r0
+	mov.w	r0,@r1		;r1=H'???05554
+	xor	r2,r1
+	mov	#H'a0,r0
+	mov.w	r0,@r1		;r1=H'???0aaaa
+	pop	r2
+	pop	r1
+	mov.l	@sp,r0
+	mov.w	r0,@r1		;r1=H'???*****
+	;* end check *
+	tst	#B'10000000,r0
+	bf	dbg_era_fnc_fla_0	; bit7=1 !
+	;* end check (bit7=0)
+dbg_wri_fla_fnc_0
+	mov.w	@r1,r0
+	tst	#B'10000000,r0
+	bt	dbg_wri_fla_fnc_1	; bit7=0 ok !
+	tst	#B'00100000,r0
+	bt	dbg_wri_fla_fnc_0	; bit5=0 check !
+	mov.w	@r1,r0
+	tst	#B'10000000,r0
+	bt	dbg_era_fnc_fla_1	; bit7=0 ok !
+dbg_wri_fla_fnc_1
+	rts
+	pop	r0
+
+;- erase write flash with reset function -
+; entry	 r0=size
+;	 r1=flash address
+;	 r2=source address
+; return none.(reset)
+; break	 r0,r1,r2
+dbg_era_wri_fla_rst_fnc
+	bsr	dbg_era_wri_fla_fnc
+	nop
+	;
+	bra	dbg_sys_res_fnc
+	nop
+
+;- system reset function -
+; entry	 none.
+; return none.(reset)
+; break	 r0,r1
+dbg_sys_res_fnc:
+	mov.l	#WTCNT,r1
+	mov.w	#H'5a00,r0
+	mov.w	r0,@r1
+	mov.l	#WTCSR,r1
+	mov.w	#H'a5c7,r0	; clk:1/4096 (5.25msec at 33MHz)
+	mov.w	r0,@r1
+dbg_sys_res_fnc_loop
+	nop
+	bra	dbg_sys_res_fnc_loop
+	nop
+
+ .aif 1 EQ 0							;- 2002/6/1 ..
+dbg_fla_fnc_end	;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+	.section	DBG_B1, DATA, ALIGN=8
+dbg_fla_wrk
+	.res.b	dbg_fla_fnc_end-dbg_fla_fnc_top
+ .aendi								;.. - 2002/6/1
+
+	.end
+

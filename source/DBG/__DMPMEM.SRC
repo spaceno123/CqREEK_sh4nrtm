@@ -1,0 +1,258 @@
+;
+;	Program	__DMPMEM.SRC
+;	Date	2001/1/13 .. 2001/1/15
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/2/18	modify section offset
+; 2001/3/28	add import function
+; 2001/9/22	modify branch -> branch, filename
+; 2001/11/11	add export for dbg_dmp_wch
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf, dbg_chk_rxd_buf, dbg_puthn
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_chk_rxd_buf_sub
+	branch	dbg_chk_rxd_buf
+
+dbg_puthn_sub
+	branch	dbg_puthn
+
+	;///////////////////
+	;/// dump memory ///
+	;///////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_dmp_mem
+dbg_dmp_mem:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_dmp_mem_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_dmp_mem_2	; error !
+dbg_dmp_mem_0
+	bsr	dbg_dmp_mem_hex	;<ent> r0=start, r1=end <ret> T=0:end
+	nop
+	;
+	bsr	dbg_dmp_mem_asc	;<ent> r0=start, r1=end <ret> T=0:end
+	nop
+	;
+	bf	dbg_dmp_mem_1	; end !
+	bsr	dbg_chk_rxd_buf_sub	;<ent> noen. <ret> T=1:data in
+	push	r0
+	;
+	pop	r0
+	bt	dbg_dmp_mem_2	; break !
+	push	r0	;!
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	pop	r0	;!
+	add	#H'10,r0
+	not	r0,r0
+	or	#H'0f,r0
+	bra	dbg_dmp_mem_0
+	not	r0,r0
+	;
+dbg_dmp_mem_1
+	sett
+dbg_dmp_mem_2
+	lds	@sp+,pr
+	rts
+	nop
+dbg_dmp_mem_scn
+	.sdataz	"%x,%x\r"
+	.align	8
+
+;- dump memory hex -
+; entry	 r0=start address
+;	 r1=end address
+; return T=1:not end,0:end
+; break	 none.
+	.export	dbg_dmp_mem_hex
+dbg_dmp_mem_hex:
+	push	r0		;!
+	push	r1		;!!
+	sts.l	pr,@-sp		;!!!
+	mov	#B'11110000,r1
+	and	r1,r0
+	bsr	dbg_puthn_sub	; address
+	mov	#8,r1
+	;
+	bsr	dbg_putc_sub	; space
+	mov	#" ",r0
+	;
+	mov.l	@(8,sp),r1	;!
+	mov	r1,r0
+	and	#H'f,r0
+	cmp/eq	#0,r0
+	bt	dbg_dmp_mem_hex_1
+	mov	r0,r1		;r1=r0
+	shll	r1		;r1=r0*2
+	add	r0,r1		;r1=r0*3
+	add	#1,r1
+	mov	#8*3+1,r0
+	cmp/hi	r0,r1
+	bf	dbg_dmp_mem_hex_0
+	add	#1,r1
+dbg_dmp_mem_hex_0
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+	dt	r1
+	bf	dbg_dmp_mem_hex_0
+	mov.l	@(8,sp),r1	;!
+dbg_dmp_mem_hex_1
+	mov	r1,r0
+	and	#H'7,r0
+	cmp/eq	#0,r0
+	bf	dbg_dmp_mem_hex_2
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+dbg_dmp_mem_hex_2
+	mov.b	@r1,r0
+	push	r1		;!!!!
+	bsr	dbg_puthn_sub
+	mov	#2,r1
+	;
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+	pop	r1		;!!!!
+	mov	@(4,sp),r0	;!!
+	cmp/eq	r0,r1
+	bt	dbg_dmp_mem_hex_3	; end !
+	add	#1,r1
+	mov	r1,r0
+	and	#H'f,r0
+	cmp/eq	#0,r0
+	bf	dbg_dmp_mem_hex_1	; next !
+	bra	dbg_dmp_mem_hex_6	; continue end !
+	nop
+	;
+dbg_dmp_mem_hex_3
+	and	#H'f,r0
+	mov	#H'f,r1
+	sub	r0,r1
+	mov	r1,r0
+	cmp/eq	#0,r0
+	bt	dbg_dmp_mem_hex_5
+	shll	r1
+	add	r0,r1	;r1=r0*3
+	mov	#8*3,r0
+	cmp/hi	r0,r1
+	bf	dbg_dmp_mem_hex_4
+	add	#1,r1
+dbg_dmp_mem_hex_4
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+	dt	r1
+	bf	dbg_dmp_mem_hex_4
+dbg_dmp_mem_hex_5
+	clrt
+dbg_dmp_mem_hex_6
+	lds.l	@sp+,pr	;!!!
+	pop	r1	;!!
+	rts
+	pop	r0	;!
+
+;- dump memory ascii -
+; entry	 r0=start address
+;	 r1=end address
+; return T=1:not end,0:end
+; break	 none.
+	.export	dbg_dmp_mem_asc
+dbg_dmp_mem_asc:
+	push	r0		;!
+	push	r1		;!!
+	sts.l	pr,@-sp		;!!!
+	and	#H'f,r0
+	add	#1,r0
+	mov	r0,r1
+dbg_dmp_mem_asc_0
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+	dt	r1
+	bf	dbg_dmp_mem_asc_0
+	mov.l	@(8,sp),r1	;!
+dbg_dmp_mem_asc_1
+	mov.b	@r1,r0
+	push	r1		;!!!!
+	mov	#" ",r1
+	cmp/hi	r0,r1
+	bt	dbg_dmp_mem_asc_2	;r0 < " " !
+	mov	#H'80,r1
+	cmp/hi	r0,r1
+	bt	dbg_dmp_mem_asc_3	; " " =< r0 < H'80 !
+	mov	#H'a0,r1
+	cmp/hi	r0,r1
+	bt	dbg_dmp_mem_asc_2	;H'80 =< r0 < H'a0 !
+	mov	#H'e0,r1
+	cmp/hi	r0,r1
+	bt	dbg_dmp_mem_asc_3	;H'a0 =< r0 < H'e0 !
+dbg_dmp_mem_asc_2
+	mov	#".",r0
+dbg_dmp_mem_asc_3
+	bsr	dbg_putc_sub
+	pop	r1		;!!!!
+	;
+	mov	@(4,sp),r0
+	cmp/eq	r1,r0
+	bt	dbg_dmp_mem_asc_4	; end !
+	add	#1,r1
+	mov	r1,r0
+	and	#H'f,r0
+	cmp/eq	#0,r0
+	bf	dbg_dmp_mem_asc_1	; next !
+	bra	dbg_dmp_mem_asc_7	; continue end !
+	nop
+	;
+dbg_dmp_mem_asc_4
+	and	#H'f,r0
+	mov	#H'f,r1
+	sub	r0,r1
+	mov	r1,r0
+	cmp/eq	#0,r0
+	bt	dbg_dmp_mem_asc_6
+dbg_dmp_mem_asc_5
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+	dt	r1
+	bf	dbg_dmp_mem_asc_5
+dbg_dmp_mem_asc_6
+	clrt
+dbg_dmp_mem_asc_7
+	lds.l	@sp+,pr	;!!!
+	pop	r1	;!!
+	rts
+	pop	r0	;!
+
+	.end
+

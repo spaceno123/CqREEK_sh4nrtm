@@ -1,0 +1,2195 @@
+;
+;	Program	__DISASM.SRC
+;	Date	2001/4/14 .. 2001/5/18
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/5/19	modify dbg_puthx, add dbg_dis_asm_lin
+; 2001/6/19	add fpu instruction
+; 2001/6/23	add delay slot instruction report
+; 2001/6/26	add dbg_dis_asm_brk
+; 2001/8/15	add dbg_is_slp_or_tra (for step)
+; 2001/9/22	modify branch -> branch, filename
+; 2001/11/28	export dbg_dis_adr, dbg_dsp_opc, dbg_dsp_opr <- cancel
+; 2001/12/2	add dbg_is_cal_or_dt (for view step)
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf, dbg_puthn, dbg_puts, dbg_puth1
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_puthn_sub
+	branch	dbg_puthn
+
+dbg_puts_sub
+	branch	dbg_puts
+
+dbg_puth1_sub
+	branch	dbg_puth1
+
+	;////////////////////
+	;/// dis assemble ///
+	;////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+;- dis assemble line for break -
+; entry	 r0=address
+; return none.
+; brack	 r0,r1
+	.export	dbg_dis_asm_brk
+dbg_dis_asm_brk:
+	sts.l	pr,@-sp
+	bsr	dbg_dis_adr
+	push	r0	;!
+	;
+	mov	#1,r1
+	mov	#0,r0
+	addc	r0,r1
+	bra	dbg_dis_asm_0
+	pop	r0	;!
+
+;- dis assemble line -
+; entry	 r0=address
+;	 r1=step
+; return none.
+; break	 r0,r1
+	.export	dbg_dis_asm_lin
+dbg_dis_asm_lin:
+	sts.l	pr,@-sp
+	bra	dbg_dis_asm_0
+	nop
+
+	.export	dbg_dis_asm
+dbg_dis_asm:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_dis_asm_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_dis_asm_z	; error !
+	tst	r1,r1
+	bf	dbg_dis_asm_0
+	bra	dbg_dis_asm_z	; size zero !
+	clrt
+	;* r0=address, r1=step *
+dbg_dis_asm_0
+	push	r1		;!
+	push	r0		;!!
+	bsr	dbg_puthn_sub	; address
+	mov	#8,r1
+	;
+	mov.l	#dbg_dis_asm_sp2,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	mov.l	@sp,r0		;!!
+	mov.w	@r0,r0
+	bsr	dbg_puthn_sub	; dump
+	mov	#4,r1
+	;
+	bsr	dbg_dis_adr
+	mov.l	@sp,r0		;!!
+	;
+	push	r0		;!!!
+	mov.l	#dbg_dis_asm_sp8,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	bsr	dbg_dsp_opc
+	mov	@sp,r0		;!!!
+	;
+	mov.l	@(4,sp),r1	;!!
+	bsr	dbg_dsp_opr
+	mov	@sp,r0		;!!!
+	;
+	add	#4,sp		;!!!
+	pop	r0		;!!
+	pop	r1		;!
+	dt	r1
+	bt	dbg_dis_asm_z	; end !
+	push	r0		;!
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	pop	r0		;!
+	bra	dbg_dis_asm_0
+	add	#2,r0
+	;
+dbg_dis_asm_z
+	lds	@sp+,pr
+	rts
+	nop
+dbg_dis_asm_scn
+	.sdataz	"%x,%x\r"
+dbg_dis_asm_sp8
+	.sdata	"      "	; continue next line !
+dbg_dis_asm_sp2
+	.sdataz	"  "
+	.align	8
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+;- dis assemble address -
+; entry	 r0=address
+; return r0=dis assemble code
+;	 T=1:delay slot instruction
+; break	 r0,r1
+;-	.export	dbg_dis_adr
+dbg_dis_adr:
+	mov.w	@r0,r0		; continue !
+
+;- dis assemble subroutine -
+; entry	 r0=code
+; return r0=dis assemble code
+;	 T=1:delay slot instruction
+; break	 r0,r1
+dbg_dis_sub:
+	sts.l	pr,@-sp
+	push	r0	;!
+	mov.l	#op_tbl_top,r1
+	bra	dbg_dis_sub_0a
+	sts	fpscr,r0	; -------- --FSPDcc cccceeee efffffRM
+	;
+dbg_dis_sub_0
+	push	r0	;!
+dbg_dis_sub_0a
+	push	r1	;!!
+	add	#-4,r1
+	mov.l	@r1,r1
+	push	r1	;!!!
+	swap.w	r1,r1
+	exts.w	r1,r1
+	shld	r1,r0
+	pop	r1	;!!!
+	extu.w	r1,r1
+	and	r1,r0
+	pop	r1	;!!
+	mov.l	@(r0,r1),r1
+	pop	r0	;!
+	shlr	r1
+	bt	dbg_dis_sub_1	; lsb=1 !
+	bra	dbg_dis_sub_0
+	shll	r1
+	;
+dbg_dis_sub_1
+	not	r1,r0		;delay slot flag 0->1,1->0
+	tst	#H'80,r0	; check 0->T=1,1->T=0
+	or	#H'80,r0	; set 1
+	lds.l	@sp+,pr
+	rts
+	not	r0,r0		; clear
+
+;- is sleep or trapa -
+; entry	 r0=address
+; return T=1:sleep or trapa, 0:other
+; break	 r0,r1
+	.export	dbg_is_slp_or_tra
+dbg_is_slp_or_tra:
+	sts.l	pr,@-sp
+	bsr	dbg_dis_adr
+	nop
+	;
+	lds.l	@sp+,pr
+	swap.w	r0,r0
+	extu.w	r0,r0
+	mov.w	#_sleep-opc_str_tbl,r1
+	cmp/eq	r1,r0
+	bt	dbg_is_slp_or_tra_0	; sleep !
+	mov.w	#_trapa-opc_str_tbl,r1
+	cmp/eq	r1,r0
+dbg_is_slp_or_tra_0
+	rts
+	nop
+
+;- is bsr, jsr or dt -
+; entry	 r0=address
+; return T=1:bsr, jsr or dt, 0:other
+; break	 r0,r1
+	.export	dbg_is_cal_or_dt
+dbg_is_cal_or_dt:
+	sts.l	pr,@-sp
+	bsr	dbg_dis_adr
+	nop
+	;
+	lds.l	@sp+,pr
+	swap.w	r0,r0
+	extu.w	r0,r0
+	mov.w	#_bsr-opc_str_tbl,r1
+	cmp/eq	r1,r0
+	bt	dbg_is_cal_or_dt_0	; bsr !
+	mov.w	#_jsr-opc_str_tbl,r1
+	cmp/eq	r1,r0
+	bt	dbg_is_cal_or_dt_0	; jsr !
+	mov.w	#_dt-opc_str_tbl,r1
+	cmp/eq	r1,r0
+dbg_is_cal_or_dt_0
+	rts
+	nop
+
+;- disp operation code -
+; entry	 r0=code
+; return none.
+; break	 r0,r1
+;-	.export	dbg_dsp_opc
+dbg_dsp_opc:
+	sts.l	pr,@-sp
+	swap.w	r0,r0
+	extu.w	r0,r0
+	mov.l	#opc_str_tbl,r1
+	add.l	r0,r1
+	mov	#8,r0
+dbg_dsp_opc_0
+	push	r0	;!
+	mov.b	@r1+,r0
+	cmp/eq	#0,r0
+	bt	dbg_dsp_opc_1	; end !
+	bsr	dbg_putc_sub
+	nop
+	;
+	pop	r0	;!
+	cmp/eq	#0,r0
+	bt	dbg_dsp_opc_0
+	bra	dbg_dsp_opc_0
+	add	#-1,r0
+	;
+dbg_dsp_opc_1
+	pop	r1	;!
+	tst	r1,r1
+	bt	dbg_dsp_opc_3
+dbg_dsp_opc_2
+	bsr	dbg_putc_sub
+	mov	#" ",r0
+	;
+	dt	r1
+	bf	dbg_dsp_opc_2
+dbg_dsp_opc_3
+	lds.l	@sp+,pr
+	rts
+	nop
+
+;- disp operand -
+; entry	 r0=code
+;	 r1=address
+; return none.
+; break	 r0,r1
+;-	.export	dbg_dsp_opr
+dbg_dsp_opr:
+	extu.w	r0,r0
+	cmp/eq	#0,r0
+	bt	dbg_dsp_opr_z
+	sts.l	pr,@-sp
+	push	r0	;!
+	push	r1	;!!
+	bsr	dbg_dsp_opr_sub
+	swap.b	r0,r0
+	;
+	mov.l	@(4,sp),r1
+	extu.b	r1,r1
+	tst	r1,r1
+	bt	dbg_dsp_opr_0
+	bsr	dbg_putc_sub
+	mov.b	#",",r0
+	;
+	bsr	dbg_dsp_opr_sub
+	mov	r1,r0
+	;
+dbg_dsp_opr_0
+	add	#8,sp	;!!,!
+	lds.l	@sp+,pr
+dbg_dsp_opr_z
+	rts
+	nop
+dbg_dsp_opr_sub
+	extu.b	r0,r0
+	shll2	r0	;x4
+	shll	r0	;x2
+	mov.l	#opr_dsp_tbl,r1
+	add	r0,r1
+	mov.l	@r1+,r0	; r0=function address
+	mov.l	@r1,r1	; r1=strings address
+	jmp	@r0
+	mov.l	@sp,r0	; r0=pc address
+
+;- put hex ? -
+; entry	 r0=data
+; return none.
+; break	 r0,r1
+dbg_puthx:
+	push	r0
+	mov	#1,r1
+dbg_puthx_0
+	shlr2	r0
+	shlr2	r0
+	cmp/eq	#0,r0
+	bt	dbg_puthx_1
+	bra	dbg_puthx_0
+	add	#1,r1
+	;
+dbg_puthx_1
+	bra	dbg_puthn_sub
+	pop	r0
+
+;- register number -
+; entry	 r0=register number
+; return none.
+; break	 r0
+; see	 rh_dsp_1
+reg_num:
+	bra	rh_dsp_1
+	sts.l	pr,@-sp
+
+;- *_dsp -
+; entry	 r0 = pc address
+;	 r1 = strings data top
+; return none.
+; break	 r0,r1
+
+fvh_dsp:
+	mov.w	@r0,r0
+	swap.b	r0,r0
+	bra	rh_dsp_0
+	and	#H'0c,r0
+
+xdh_dsp:
+	mov.w	@r0,r0
+	swap.b	r0,r0
+	bra	rh_dsp_0
+	and	#H'0e,r0
+
+drh_dsp:
+frh_dsp:
+arh_dsp:
+amrh_dsp:
+rh_dsp:
+	;* sR *
+	mov.w	@r0,r0
+	swap.b	r0,r0
+rh_dsp_0
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0
+	;
+	pop	r0
+rh_dsp_1
+	and	#H'f,r0
+	add	#-10,r0
+	cmp/pz	r0
+	bf	rh_dsp_2
+	push	r0
+	bsr	dbg_putc_sub
+	mov	#"1",r0
+	;
+	pop	r0
+	add	#-10,r0
+rh_dsp_2
+	add	#"0"+10,r0
+	bsr	dbg_putc_sub
+	lds.l	@sp+,pr
+
+fvl_dsp:
+	mov.w	@r0,r0
+	swap.b	r0,r0
+	shll2	r0
+	bra	rh_dsp_0
+	and	#H'0c,r0
+
+xdl_dsp:
+	mov.w	@r0,r0
+	shlr2	r0
+	shlr2	r0
+	bra	rh_dsp_0
+	and	#H'0e,r0
+
+drl_dsp:
+frl_dsp:
+arl_dsp:
+rl_dsp:
+	;* sR *
+	mov.w	@r0,r0
+	shlr2	r0
+	bra	rh_dsp_0
+	shlr2	r0
+
+ad4lrh_dsp:
+	;* s2sRs *
+	mov.w	@r0,r0
+	push	r1
+	mov	#H'f,r1	;r1=H'0000000f
+	swap.b	r1,r1	;r1=H'00000f00
+	and	r0,r1	;r1=H'00000?00
+	and	#H'f,r0
+	shll2	r0	;x4
+	or	r1,r0
+ad4lrh_dsp_0
+	pop	r1
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0
+	;
+	mov.l	@sp,r0
+	and	#H'ff,r0
+	shlr2	r0
+	shlr2	r0
+	cmp/eq	#0,r0
+	bt	ad4lrh_dsp_1
+	bsr	dbg_puth1_sub
+	nop
+	;
+ad4lrh_dsp_1
+	bsr	dbg_puth1_sub
+	mov.l	@sp,r0
+	;
+ad4lrh_dsp_2
+	bsr	dbg_puts_sub
+	nop
+	;
+	pop	r0
+	bsr	reg_num
+	swap.b	r0,r0
+	;
+	bra	dbg_puts_sub
+	lds.l	@sp+,pr
+
+ad4lrl_dsp:
+	;* s2sRs *
+	mov.w	@r0,r0
+	push	r1
+	mov	#H'78,r1
+	shll	r1	;H'000000f0
+	and	r0,r1
+	shll2	r1
+	shll2	r1
+	and	#H'0f,r0
+	shll2	r0	;x4
+	bra	ad4lrh_dsp_0
+	or	r1,r0
+
+ad4wrl_dsp:
+	;* s2sRs *
+	mov.w	@r0,r0
+	push	r1
+	mov	#H'78,r1
+	shll	r1	;H'000000f0
+	and	r0,r1
+	shll2	r1
+	shll2	r1
+	and	#H'0f,r0
+	shll	r0	;x2
+	bra	ad4lrh_dsp_0
+	or	r1,r0
+
+ad4brl_dsp:
+	;* s2sRs *
+	mov.w	@r0,r0
+	push	r1
+	mov	#H'78,r1
+	shll	r1	;H'000000f0
+	and	r0,r1
+	shll2	r1
+	shll2	r1
+	and	#H'0f,r0
+	bra	ad4lrh_dsp_0
+	or	r1,r0
+
+i8_dsp:
+	;* s2 *
+	mov.w	@r0,r0
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0
+	;
+	pop	r0
+	mov	#2,r1
+	bra	dbg_puthn_sub
+	lds.l	@sp+,pr
+
+ar0drh_dsp:
+ar0srh_dsp:
+arhp_dsp:
+ar0brh_dsp:
+ar0wrh_dsp:
+ar0lrh_dsp:
+	;* sRs *
+	mov.w	@r0,r0
+	sts.l	pr,@-sp
+	bra	ad4lrh_dsp_2
+	push	r0
+
+ar0drl_dsp:
+ar0srl_dsp:
+arlp_dsp:
+ar0brl_dsp:
+ar0wrl_dsp:
+ar0lrl_dsp:
+	;* sRs *
+	mov.w	@r0,r0
+ar0lrl_dsp_0
+	sts.l	pr,@-sp
+	shll2	r0
+	shll2	r0
+	bra	ad4lrh_dsp_2
+	push	r0
+
+rlbank_dsp:
+	;* s1s *
+	mov.w	@r0,r0
+	bra	ar0lrl_dsp_0
+	and	#H'70,r0
+
+ad8bgbr_dsp:
+	;* s3s *
+	mov.w	@r0,r0
+	extu.b	r0,r0
+ad8bgbr_dsp_0
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0
+	;
+	pop	r0
+	bsr	dbg_puthx
+	push	r1
+	;
+	pop	r1
+	bra	dbg_puts_sub
+	lds.l	@sp+,pr
+
+ad8wgbr_dsp:
+	;* s3s *
+	mov.w	@r0,r0
+	extu.b	r0,r0
+	bra	ad8bgbr_dsp_0
+	shll	r0
+
+ad8lgbr_dsp:
+	;* s3s *
+	mov.w	@r0,r0
+	extu.b	r0,r0
+	bra	ad8bgbr_dsp_0
+	shll2	r0
+
+l12_dsp:
+	;* s? *
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0
+	;
+	pop	r1
+	mov.w	@r1,r0
+	shll2	r0
+	shll2	r0
+	exts.w	r0,r0
+	shar	r0
+	shar	r0
+	shar	r0
+l12_dsp_0
+	add	#4,r1
+	add	r1,r0
+	bra	dbg_puthx
+	lds.l	@sp+,pr
+
+l8_dsp:
+	;* s? *
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0
+	;
+	pop	r1
+	mov.w	@r1,r0
+	exts.b	r0,r0
+	bra	l12_dsp_0
+	shll	r0
+
+ad8wpc_dsp:
+	;* s?s *
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0		;!
+	;
+	mov.l	@sp,r0		;!
+	push	r1		;!!
+	mov.w	@r0,r1
+	extu.b	r1,r1
+	shll	r1
+	add	#4,r0
+	add	r1,r0
+	bsr	dbg_puthx
+	mov.l	r0,@(4,sp)	;!
+	;
+	bsr	dbg_puts_sub
+	pop	r1		;!!
+	;
+	pop	r0
+	mov.w	@r0,r0
+	mov	#4,r1
+	bra	dbg_puthn_sub
+	lds.l	@sp+,pr
+
+ad8lpc_dsp:
+	;* s?s *
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0		;!
+	;
+	mov.l	@sp,r0		;!
+	push	r1		;!!
+	mov.w	@r0,r1
+	extu.b	r1,r1
+	shll2	r1
+	shlr2	r0
+	shll2	r0
+	add	#4,r0
+	add	r1,r0
+	bsr	dbg_puthx
+	mov.l	r0,@(4,sp)	;!
+	;
+	bsr	dbg_puts_sub
+	pop	r1		;!!
+	;
+	pop	r0
+	mov.l	@r0,r0
+	mov	#8,r1
+	bra	dbg_puthn_sub
+	lds.l	@sp+,pr
+
+ad8pc_dsp:
+	sts.l	pr,@-sp
+	bsr	dbg_puts_sub
+	push	r0
+	;
+	pop	r0
+	push	r1
+	mov.w	@r0,r1
+	extu.b	r1,r1
+	shll	r1
+	add	#4,r0
+	bsr	dbg_puthx
+	add	r1,r0
+	;
+	pop	r1
+	bsr	dbg_puts_sub
+	lds.l	@sp+,pr
+
+nul_dsp:
+r0_dsp:
+ar0gbr_dsp:
+sr_dsp:
+gbr_dsp:
+vbr_dsp:
+ssr_dsp:
+spc_dsp:
+mach_dsp:
+macl_dsp:
+pr_dsp:
+sgr_dsp:
+dbr_dsp:
+fpul_dsp:
+fpscr_dsp:
+xmtrx_dsp:
+	;* s *
+	bra	dbg_puts_sub
+	nop
+
+	;%%%%%%%%%
+	;% table %
+	;%%%%%%%%%
+	.align	4
+
+	.macro	shx_msk	shift,mask
+	.data.w	\shift,\mask
+	.endm
+
+	.macro	nxt_tbl	adr
+	.data.l	\adr
+	.endm
+
+	.macro	OPC_OPR	opc,opr1=_nul,opr2=_nul,dly=0
+	.data.w	(\opc-opc_str_tbl)*2
+	.data.b	\opr1'*2+\dly,\opr2'*2+1	;bit0=1 then dis assemble code
+	.endm					;bit8=1 then delay slot flag
+
+	;%%%%%%%%
+	;% zero %
+	;%%%%%%%%
+
+	shx_msk	-19+2,H'0c	; ((fpscr) >> 19) << 2) & H'0c
+op_tbl_top:
+	nxt_tbl	op_x___		; sz=0,pr=0
+	nxt_tbl	op_x____pr	; sz=0,pr=1
+	nxt_tbl	op_x____sz	; sz=1,pr=0
+	nxt_tbl	op_x____szpr	; sz=1,pr=1
+
+	;%%%%%%%
+	;% 1st %
+	;%%%%%%%
+
+	shx_msk	-12+2,H'3c	; ((code >> 12) << 2) & H'3c
+op_x___:
+	nxt_tbl	op_0__x
+ OPC_OPR _mov_l,_rl,_ad4lrh	;MOV.L   Rm,@(disp,Rn)  0001nnnnmmmmdddd
+	nxt_tbl	op_2__x
+	nxt_tbl	op_3__x
+	nxt_tbl	op_4__x
+ OPC_OPR _mov_l,_ad4lrl,_rh	;MOV.L   @(disp,Rm),Rn  0101nnnnmmmmdddd
+	nxt_tbl	op_6__x
+ OPC_OPR _add,_i8,_rh		;ADD     #imm,Rn        0111nnnniiiiiiii
+	nxt_tbl	op_8x__
+ OPC_OPR _mov_w,_ad8wpc,_rh	;MOV.W   @(disp,PC),Rn  1001nnnndddddddd
+ OPC_OPR _bra,_l12,_nul,1	;BRA     label          1010dddddddddddd
+ OPC_OPR _bsr,_l12,_nul,1	;BSR     label          1011dddddddddddd
+	nxt_tbl	op_cx__
+ OPC_OPR _mov_l,_ad8lpc,_rh	;MOV.L   @(disp,PC),Rn  1101nnnndddddddd
+ OPC_OPR _mov,_i8,_rh		;MOV     #imm,Rn        1110nnnniiiiiiii
+	nxt_tbl	op_f__x
+
+	shx_msk	-12+2,H'3c	; ((code >> 12) << 2) & H'3c
+op_x____pr:
+	nxt_tbl	op_0__x
+ OPC_OPR _mov_l,_rl,_ad4lrh	;MOV.L   Rm,@(disp,Rn)  0001nnnnmmmmdddd
+	nxt_tbl	op_2__x
+	nxt_tbl	op_3__x
+	nxt_tbl	op_4__x
+ OPC_OPR _mov_l,_ad4lrl,_rh	;MOV.L   @(disp,Rm),Rn  0101nnnnmmmmdddd
+	nxt_tbl	op_6__x
+ OPC_OPR _add,_i8,_rh		;ADD     #imm,Rn        0111nnnniiiiiiii
+	nxt_tbl	op_8x__
+ OPC_OPR _mov_w,_ad8wpc,_rh	;MOV.W   @(disp,PC),Rn  1001nnnndddddddd
+ OPC_OPR _bra,_l12,_nul,1	;BRA     label          1010dddddddddddd
+ OPC_OPR _bsr,_l12,_nul,1	;BSR     label          1011dddddddddddd
+	nxt_tbl	op_cx__
+ OPC_OPR _mov_l,_ad8lpc,_rh	;MOV.L   @(disp,PC),Rn  1101nnnndddddddd
+ OPC_OPR _mov,_i8,_rh		;MOV     #imm,Rn        1110nnnniiiiiiii
+	nxt_tbl	op_f__x_pr
+
+	shx_msk	-12+2,H'3c	; ((code >> 12) << 2) & H'3c
+op_x____sz:
+	nxt_tbl	op_0__x
+ OPC_OPR _mov_l,_rl,_ad4lrh	;MOV.L   Rm,@(disp,Rn)  0001nnnnmmmmdddd
+	nxt_tbl	op_2__x
+	nxt_tbl	op_3__x
+	nxt_tbl	op_4__x
+ OPC_OPR _mov_l,_ad4lrl,_rh	;MOV.L   @(disp,Rm),Rn  0101nnnnmmmmdddd
+	nxt_tbl	op_6__x
+ OPC_OPR _add,_i8,_rh		;ADD     #imm,Rn        0111nnnniiiiiiii
+	nxt_tbl	op_8x__
+ OPC_OPR _mov_w,_ad8wpc,_rh	;MOV.W   @(disp,PC),Rn  1001nnnndddddddd
+ OPC_OPR _bra,_l12,_nul,1	;BRA     label          1010dddddddddddd
+ OPC_OPR _bsr,_l12,_nul,1	;BSR     label          1011dddddddddddd
+	nxt_tbl	op_cx__
+ OPC_OPR _mov_l,_ad8lpc,_rh	;MOV.L   @(disp,PC),Rn  1101nnnndddddddd
+ OPC_OPR _mov,_i8,_rh		;MOV     #imm,Rn        1110nnnniiiiiiii
+	nxt_tbl	op_f__x_sz
+
+	shx_msk	-12+2,H'3c	; ((code >> 12) << 2) & H'3c
+op_x____szpr:
+	nxt_tbl	op_0__x
+ OPC_OPR _mov_l,_rl,_ad4lrh	;MOV.L   Rm,@(disp,Rn)  0001nnnnmmmmdddd
+	nxt_tbl	op_2__x
+	nxt_tbl	op_3__x
+	nxt_tbl	op_4__x
+ OPC_OPR _mov_l,_ad4lrl,_rh	;MOV.L   @(disp,Rm),Rn  0101nnnnmmmmdddd
+	nxt_tbl	op_6__x
+ OPC_OPR _add,_i8,_rh		;ADD     #imm,Rn        0111nnnniiiiiiii
+	nxt_tbl	op_8x__
+ OPC_OPR _mov_w,_ad8wpc,_rh	;MOV.W   @(disp,PC),Rn  1001nnnndddddddd
+ OPC_OPR _bra,_l12,_nul,1	;BRA     label          1010dddddddddddd
+ OPC_OPR _bsr,_l12,_nul,1	;BSR     label          1011dddddddddddd
+	nxt_tbl	op_cx__
+ OPC_OPR _mov_l,_ad8lpc,_rh	;MOV.L   @(disp,PC),Rn  1101nnnndddddddd
+ OPC_OPR _mov,_i8,_rh		;MOV     #imm,Rn        1110nnnniiiiiiii
+ OPC_OPR _undef			;?
+
+	;%%%%%%%
+	;% 2nd %
+	;%%%%%%%
+
+	shx_msk	0+2,H'3c	; ((code >> 0) << 2) & H'3c
+op_0__x:
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+	nxt_tbl	op_0_x2
+	nxt_tbl	op_0_x3
+ OPC_OPR _mov_b,_rl,_ar0brh	;MOV.B   Rm,@(R0,Rn)    0000nnnnmmmm0100
+ OPC_OPR _mov_w,_rl,_ar0wrh	;MOV.W   Rm,@(R0,Rn)    0000nnnnmmmm0101
+ OPC_OPR _mov_l,_rl,_ar0lrh	;MOV.L   Rm,@(R0,Rn)    0000nnnnmmmm0110
+ OPC_OPR _mul_l,_rl,_rh		;MUL.L   Rm,Rn          0000nnnnmmmm0111
+	nxt_tbl	op_0x_8
+	nxt_tbl	op_0_x9
+	nxt_tbl	op_0_xa
+	nxt_tbl	op_0x_b
+ OPC_OPR _mov_b,_ar0brl,_rh	;MOV.B   @(R0,Rm),Rn    0000nnnnmmmm1100
+ OPC_OPR _mov_w,_ar0wrl,_rh	;MOV.W   @(R0,Rm),Rn    0000nnnnmmmm1101
+ OPC_OPR _mov_l,_ar0lrl,_rh	;MOV.L   @(R0,Rm),Rn    0000nnnnmmmm1110
+ OPC_OPR _mac_l,_arlp,_arhp	;MAC.L   @Rm+,@Rn+      0000nnnnmmmm1111
+
+	shx_msk	0+2,H'3c	; ((code >> 0) << 2) & H'3c
+op_2__x:
+ OPC_OPR _mov_b,_rl,_arh	;MOV.B   Rm,@Rn         0010nnnnmmmm0000
+ OPC_OPR _mov_w,_rl,_arh	;MOV.W   Rm,@Rn         0010nnnnmmmm0001
+ OPC_OPR _mov_l,_rl,_arh	;MOV.L   Rm,@Rn         0010nnnnmmmm0010
+ OPC_OPR _undef			;?
+ OPC_OPR _mov_b,_rl,_amrh	;MOV.B   Rm,@-Rn        0010nnnnmmmm0100
+ OPC_OPR _mov_w,_rl,_amrh	;MOV.W   Rm,@-Rn        0010nnnnmmmm0101
+ OPC_OPR _mov_l,_rl,_amrh	;MOV.L   Rm,@-Rn        0010nnnnmmmm0110
+ OPC_OPR _div0s,_rl,_rh		;DIV0S   Rm,Rn          0010nnnnmmmm0111
+ OPC_OPR _tst,_rl,_rh		;TST     Rm,Rn          0010nnnnmmmm1000
+ OPC_OPR _and,_rl,_rh		;AND     Rm,Rn          0010nnnnmmmm1001
+ OPC_OPR _xor,_rl,_rh		;XOR     Rm,Rn          0010nnnnmmmm1010
+ OPC_OPR _or,_rl,_rh		;OR      Rm,Rn          0010nnnnmmmm1011
+ OPC_OPR _cmpstr,_rl,_rh	;CMP/STR Rm,Rn          0010nnnnmmmm1100
+ OPC_OPR _xtrct,_rl,_rh		;XTRCT   Rm,Rn          0010nnnnmmmm1101
+ OPC_OPR _mulu_w,_rl,_rh	;MULU.W  Rm,Rn          0010nnnnmmmm1110
+ OPC_OPR _muls_w,_rl,_rh	;MULS.W  Rm,Rn          0010nnnnmmmm1111
+
+	shx_msk	0+2,H'3c	; ((code >> 0) << 2) & H'3c
+op_3__x:
+ OPC_OPR _cmpeq,_rl,_rh		;CMP/EQ  Rm,Rn          0011nnnnmmmm0000
+ OPC_OPR _undef			;?
+ OPC_OPR _cmphs,_rl,_rh		;CMP/HS  Rm,Rn          0011nnnnmmmm0010
+ OPC_OPR _cmpge,_rl,_rh		;CMP/GE  Rm,Rn          0011nnnnmmmm0011
+ OPC_OPR _div1,_rl,_rh		;DIV1    Rm,Rn          0011nnnnmmmm0100
+ OPC_OPR _dmulu_l,_rl,_rh	;DMULU.L Rm,Rn          0011nnnnmmmm0101
+ OPC_OPR _cmphi,_rl,_rh		;CMP/HI  Rm,Rn          0011nnnnmmmm0110
+ OPC_OPR _cmpgt,_rl,_rh		;CMP/GT  Rm,Rn          0011nnnnmmmm0111
+ OPC_OPR _sub,_rl,_rh		;SUB     Rm,Rn          0011nnnnmmmm1000
+ OPC_OPR _undef			;?
+ OPC_OPR _subc,_rl,_rh		;SUBC    Rm,Rn          0011nnnnmmmm1010
+ OPC_OPR _subv,_rl,_rh		;SUBV    Rm,Rn          0011nnnnmmmm1011
+ OPC_OPR _add,_rl,_rh		;ADD     Rm,Rn          0011nnnnmmmm1100
+ OPC_OPR _dmuls_l,_rl,_rh	;DMULS.L Rm,Rn          0011nnnnmmmm1101
+ OPC_OPR _addc,_rl,_rh		;ADDC    Rm,Rn          0011nnnnmmmm1110
+ OPC_OPR _addv,_rl,_rh		;ADDV    Rm,Rn          0011nnnnmmmm1111
+
+	shx_msk	0+2,H'3c	; ((code >> 0) << 2) & H'3c
+op_4__x:
+	nxt_tbl	op_4_x0
+	nxt_tbl	op_4_x1
+	nxt_tbl	op_4_x2
+	nxt_tbl	op_4_x3
+	nxt_tbl	op_4_x4
+	nxt_tbl	op_4_x5
+	nxt_tbl	op_4_x6
+	nxt_tbl	op_4_x7
+	nxt_tbl	op_4_x8
+	nxt_tbl	op_4_x9
+	nxt_tbl	op_4_xa
+	nxt_tbl	op_4_xb
+ OPC_OPR _shad,_rl,_rh		;SHAD    Rm,Rn          0100nnnnmmmm1100
+ OPC_OPR _shld,_rl,_rh		;SHLD    Rm,Rn          0100nnnnmmmm1101
+	nxt_tbl	op_4_xe
+ OPC_OPR _mac_w,_arlp,_arhp	;MAC.W   @Rm+,@Rn+      0100nnnnmmmm1111
+
+	shx_msk	0+2,H'3c	; ((code >> 0) << 2) & H'3c
+op_6__x:
+ OPC_OPR _mov_b,_arl,_rh	;MOV.B   @Rm,Rn         0110nnnnmmmm0000
+ OPC_OPR _mov_w,_arl,_rh	;MOV.W   @Rm,Rn         0110nnnnmmmm0001
+ OPC_OPR _mov_l,_arl,_rh	;MOV.L   @Rm,Rn         0110nnnnmmmm0010
+ OPC_OPR _mov,_rl,_rh		;MOV     Rm,Rn          0110nnnnmmmm0011
+ OPC_OPR _mov_b,_arlp,_rh	;MOV.B   @Rm+,Rn        0110nnnnmmmm0100
+ OPC_OPR _mov_w,_arlp,_rh	;MOV.W   @Rm+,Rn        0110nnnnmmmm0101
+ OPC_OPR _mov_l,_arlp,_rh	;MOV.L   @Rm+,Rn        0110nnnnmmmm0110
+ OPC_OPR _not,_rl,_rh		;NOT     Rm,Rn          0110nnnnmmmm0111
+ OPC_OPR _swap_b,_rl,_rh	;SWAP.B  Rm,Rn          0110nnnnmmmm1000
+ OPC_OPR _swap_w,_rl,_rh	;SWAP.W  Rm,Rn          0110nnnnmmmm1001
+ OPC_OPR _negc,_rl,_rh		;NEGC    Rm,Rn          0110nnnnmmmm1010
+ OPC_OPR _neg,_rl,_rh		;NEG     Rm,Rn          0110nnnnmmmm1011
+ OPC_OPR _extu_b,_rl,_rh	;EXTU.B  Rm,Rn          0110nnnnmmmm1100
+ OPC_OPR _extu_w,_rl,_rh	;EXTU.W  Rm,Rn          0110nnnnmmmm1101
+ OPC_OPR _exts_b,_rl,_rh	;EXTS.B  Rm,Rn          0110nnnnmmmm1110
+ OPC_OPR _exts_w,_rl,_rh	;EXTS.W  Rm,Rn          0110nnnnmmmm1111
+
+	shx_msk	-8+2,H'3c	; ((code >> 8) << 2) & H'3c
+op_8x__:
+ OPC_OPR _mov_b,_r0,_ad4brl	;MOV.B   R0,@(disp,Rn)  10000000nnnndddd
+ OPC_OPR _mov_w,_r0,_ad4wrl	;MOV.W   R0,@(disp,Rn)  10000001nnnndddd
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _mov_b,_ad4brl,_r0	;MOV.B   @(disp,Rm),R0  10000100mmmmdddd
+ OPC_OPR _mov_w,_ad4wrl,_r0	;MOV.W   @(disp,Rm),R0  10000101mmmmdddd
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _cmpeq,_i8,_r0		;CMP/EQ  #imm,R0        10001000iiiiiiii
+ OPC_OPR _bt,_l8		;BT      label          10001001dddddddd
+ OPC_OPR _undef			;?
+ OPC_OPR _bf,_l8		;BF      label          10001011dddddddd
+ OPC_OPR _undef			;?
+ OPC_OPR _bts,_l8,_nul,1	;BT/S    label          10001101dddddddd
+ OPC_OPR _undef			;?
+ OPC_OPR _bfs,_l8,_nul,1	;BF/S    label          10001111dddddddd
+
+	shx_msk	-8+2,H'3c	; ((code >> 8) << 2) & H'3c
+op_cx__:
+ OPC_OPR _mov_b,_r0,_ad8bgbr	;MOV.B   R0,@(disp,GBR) 11000000dddddddd
+ OPC_OPR _mov_w,_r0,_ad8wgbr	;MOV.W   R0,@(disp,GBR) 11000001dddddddd
+ OPC_OPR _mov_l,_r0,_ad8lgbr	;MOV.L   R0,@(disp,GBR) 11000010dddddddd
+ OPC_OPR _trapa,_i8		;TRAPA   #imm           11000011iiiiiiii
+ OPC_OPR _mov_b,_ad8bgbr,_r0	;MOV.B   @(disp,GBR),R0 11000100dddddddd
+ OPC_OPR _mov_w,_ad8wgbr,_r0	;MOV.W   @(disp,GBR),R0 11000101dddddddd
+ OPC_OPR _mov_l,_ad8lgbr,_r0	;MOV.L   @(disp,GBR),R0 11000110dddddddd
+ OPC_OPR _mova,_ad8pc,_r0	;MOVA    @(disp,PC),R0  11000111dddddddd
+ OPC_OPR _tst,_i8,_r0		;TST     #imm,R0        11001000iiiiiiii
+ OPC_OPR _and,_i8,_r0		;AND     #imm,R0        11001001iiiiiiii
+ OPC_OPR _xor,_i8,_r0		;XOR     #imm,R0        11001010iiiiiiii
+ OPC_OPR _or,_i8,_r0		;OR      #imm,R0        11001011iiiiiiii
+ OPC_OPR _tst_b,_i8,_ar0gbr	;TST.B   #imm,@(R0,GBR) 11001100iiiiiiii
+ OPC_OPR _and_b,_i8,_ar0gbr	;AND.B   #imm,@(R0,GBR) 11001101iiiiiiii
+ OPC_OPR _xor_b,_i8,_ar0gbr	;XOR.B   #imm,@(R0,GBR) 11001110iiiiiiii
+ OPC_OPR _or_b,_i8,_ar0gbr	;OR.B    #imm,@(R0,GBR) 11001111iiiiiiii
+
+	shx_msk	0+2,H'3c	; ((code >> 0) << 2) & H'3c
+op_f__x:
+ OPC_OPR _fadd,_frl,_frh	;FADD    FRm,FRn        1111nnnnmmmm0000
+ OPC_OPR _fsub,_frl,_frh	;FSUB    FRm,FRn        1111nnnnmmmm0001
+ OPC_OPR _fmul,_frl,_frh	;FMUL    FRm,FRn        1111nnnnmmmm0010
+ OPC_OPR _fdiv,_frl,_frh	;FDIV    FRm,FRn        1111nnnnmmmm0011
+ OPC_OPR _fcmpeq,_frl,_frh	;FCMP/EQ FRm,FRn        1111nnnnmmmm0100
+ OPC_OPR _fcmpgt,_frl,_frh	;FCMP/GT FRm,FRn        1111nnnnmmmm0101
+ OPC_OPR _fmovs,_ar0srl,_frh	;FMOV.S  @(R0,Rm),FRn   1111nnnnmmmm0110
+ OPC_OPR _fmovs,_frl,_ar0srh	;FMOV.S  FRm,@(R0,Rn)   1111nnnnmmmm0111
+ OPC_OPR _fmovs,_arl,_frh	;FMOV.S  @Rm,FRn        1111nnnnmmmm1000
+ OPC_OPR _fmovs,_arlp,_frh	;FMOV.S  @Rm+,FRn       1111nnnnmmmm1001
+ OPC_OPR _fmovs,_frl,_arh	;FMOV.S  FRm,@Rn        1111nnnnmmmm1010
+ OPC_OPR _fmovs,_frl,_amrh	;FMOV.S  FRm,@-Rn       1111nnnnmmmm1011
+ OPC_OPR _fmov,_frl,_frh	;FMOV    FRm,FRn        1111nnnnmmmm1100
+	nxt_tbl	op_f_xd
+ OPC_OPR _fmacfr0,_frl,_frh	;FMAC    FR0,FRm,FRn    1111nnnnmmmm1110
+ OPC_OPR _undef			;?
+
+	shx_msk	0+2,H'3c	; ((code >> 0) << 2) & H'3c
+op_f__x_pr:
+	nxt_tbl	op_f_x0_pr
+	nxt_tbl	op_f_x1_pr
+	nxt_tbl	op_f_x2_pr
+	nxt_tbl	op_f_x3_pr
+	nxt_tbl	op_f_x4_pr
+	nxt_tbl	op_f_x5_pr
+ OPC_OPR _fmovs,_ar0srl,_frh	;FMOV.S  @(R0,Rm),FRn   1111nnnnmmmm0110
+ OPC_OPR _fmovs,_frl,_ar0srh	;FMOV.S  FRm,@(R0,Rn)   1111nnnnmmmm0111
+ OPC_OPR _fmovs,_arl,_frh	;FMOV.S  @Rm,FRn        1111nnnnmmmm1000
+ OPC_OPR _fmovs,_arlp,_frh	;FMOV.S  @Rm+,FRn       1111nnnnmmmm1001
+ OPC_OPR _fmovs,_frl,_arh	;FMOV.S  FRm,@Rn        1111nnnnmmmm1010
+ OPC_OPR _fmovs,_frl,_amrh	;FMOV.S  FRm,@-Rn       1111nnnnmmmm1011
+ OPC_OPR _fmov,_frl,_frh	;FMOV    FRm,FRn        1111nnnnmmmm1100
+	nxt_tbl	op_f_xd_pr
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	0+2,H'3c	; ((code >> 0) << 2) & H'3c
+op_f__x_sz:
+ OPC_OPR _fadd,_frl,_frh	;FADD    FRm,FRn        1111nnnnmmmm0000
+ OPC_OPR _fsub,_frl,_frh	;FSUB    FRm,FRn        1111nnnnmmmm0001
+ OPC_OPR _fmul,_frl,_frh	;FMUL    FRm,FRn        1111nnnnmmmm0010
+ OPC_OPR _fdiv,_frl,_frh	;FDIV    FRm,FRn        1111nnnnmmmm0011
+ OPC_OPR _fcmpeq,_frl,_frh	;FCMP/EQ FRm,FRn        1111nnnnmmmm0100
+ OPC_OPR _fcmpgt,_frl,_frh	;FCMP/GT FRm,FRn        1111nnnnmmmm0101
+ 	nxt_tbl	op_fx_6_sz
+	nxt_tbl	op_f_x7_sz
+	nxt_tbl	op_fx_8_sz
+	nxt_tbl	op_fx_9_sz
+	nxt_tbl	op_f_xa_sz
+	nxt_tbl	op_f_xb_sz
+	nxt_tbl	op_f_xc_sz
+	nxt_tbl	op_f_xd
+ OPC_OPR _fmacfr0,_frl,_frh	;FMAC    FR0,FRm,FRn    1111nnnnmmmm1110
+ OPC_OPR _undef			;?
+
+	;%%%%%%%
+	;% 3rd %
+	;%%%%%%%
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_0_x2:
+ OPC_OPR _stc,_sr,_rh		;STC     SR,Rn          0000nnnn00000010
+ OPC_OPR _stc,_gbr,_rh		;STC     GBR,Rn         0000nnnn00010010
+ OPC_OPR _stc,_vbr,_rh		;STC     VBR,Rn         0000nnnn00100010
+ OPC_OPR _stc,_ssr,_rh		;STC     SSR,Rn         0000nnnn00110010
+ OPC_OPR _stc,_spc,_rh		;STC     SPC,Rn         0000nnnn01000010
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _stc,_rlbank,_rh	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+ OPC_OPR _stc,_rlbank,_rh	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+ OPC_OPR _stc,_rlbank,_rh	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+ OPC_OPR _stc,_rlbank,_rh	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+ OPC_OPR _stc,_rlbank,_rh	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+ OPC_OPR _stc,_rlbank,_rh	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+ OPC_OPR _stc,_rlbank,_rh	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+ OPC_OPR _stc,_rlbank,_rh	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_0_x3:
+ OPC_OPR _bsrf,_rh,_nul,1	;BSRF    Rn             0000nnnn00000011
+ OPC_OPR _undef			;?
+ OPC_OPR _braf,_rh,_nul,1	;BRAF    Rn             0000nnnn00100011
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _pref,_arh		;PREF    @Rn            0000nnnn10000011
+ OPC_OPR _ocbi,_arh		;OCBI    @Rn            0000nnnn10010011
+ OPC_OPR _ocbp,_arh		;OCBP    @Rn            0000nnnn10100011
+ OPC_OPR _ocbwb,_arh		;OCBWB   @Rn            0000nnnn10110011
+ OPC_OPR _movca_l,_r0,_arh	;MOVCA.L R0,@Rn         0000nnnn11000011
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'3c	; ((code >> 8) << 2) & H'3c
+op_0x_8
+	nxt_tbl	op_00x8
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_0_x9
+	nxt_tbl	op_0x09
+	nxt_tbl	op_0x19
+ OPC_OPR _movt,_rh		;MOVT    Rn             0000nnnn00101001
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_0_xa:
+ OPC_OPR _sts,_mach,_rh		;STS     MACH,Rn        0000nnnn00001010
+ OPC_OPR _sts,_macl,_rh		;STS     MACL,Rn        0000nnnn00011010
+ OPC_OPR _sts,_pr,_rh		;STS     PR,Rn          0000nnnn00101010
+ OPC_OPR _stc,_sgr,_rh		;STC     SGR,Rn         0000nnnn00111010
+ OPC_OPR _undef			;?
+ OPC_OPR _sts,_fpul,_rh		;STS     FPUL,Rn        0000nnnn01011010
+ OPC_OPR _sts,_fpscr,_rh	;STS     FPSCR,Rn       0000nnnn01101010
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _stc,_dbr,_rh		;STC     DBR,Rn         0000nnnn11111010
+
+	shx_msk	-8+2,H'3c	; ((code >> 8) << 2) & H'3c
+op_0x_b:
+	nxt_tbl	op_00xb
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x0:
+ OPC_OPR _shll,_rh		;SHLL    Rn             0100nnnn00000000
+ OPC_OPR _dt,_rh		;DT      Rn             0100nnnn00010000
+ OPC_OPR _shal,_rh		;SHAL    Rn             0100nnnn00100000
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x1:
+ OPC_OPR _shlr,_rh		;SHLR    Rn             0100nnnn00000001
+ OPC_OPR _cmppz,_rh		;CMP/PZ  Rn             0100nnnn00010001
+ OPC_OPR _shar,_rh		;SHAR    Rn             0100nnnn00100001
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x2:
+ OPC_OPR _sts_l,_mach,_amrh	;STS.L   MACH,@-Rn      0100nnnn00000010
+ OPC_OPR _sts_l,_macl,_amrh	;STS.L   MACL,@-Rn      0100nnnn00010010
+ OPC_OPR _sts_l,_pr,_amrh	;STS.L   PR,@-Rn        0100nnnn00100010
+ OPC_OPR _stc_l,_sgr,_amrh	;STC.L   SGR,@-Rn       0100nnnn00110010
+ OPC_OPR _undef			;?
+ OPC_OPR _sts_l,_fpul,_amrh	;STS.L   FPUL,@-Rn      0100nnnn01010010
+ OPC_OPR _sts_l,_fpscr,_amrh	;STS.L   FPSCR,@-Rn     0100nnnn01100010
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _stc_l,_dbr,_amrh	;STC.L   DBR,@-Rn       0100nnnn11110010
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x3:
+ OPC_OPR _stc_l,_sr,_amrh	;STC.L   SR,@-Rn        0100nnnn00000011
+ OPC_OPR _stc_l,_gbr,_amrh	;STC.L   GBR,@-Rn       0100nnnn00010011
+ OPC_OPR _stc_l,_vbr,_amrh	;STC.L   VBR,@-Rn       0100nnnn00100011
+ OPC_OPR _stc_l,_ssr,_amrh	;STC.L   SSR,@-Rn       0100nnnn00110011
+ OPC_OPR _stc_l,_spc,_amrh	;STC.L   SPC,@-Rn       0100nnnn01000011
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _stc_l,_rlbank,_amrh	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+ OPC_OPR _stc_l,_rlbank,_amrh	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+ OPC_OPR _stc_l,_rlbank,_amrh	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+ OPC_OPR _stc_l,_rlbank,_amrh	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+ OPC_OPR _stc_l,_rlbank,_amrh	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+ OPC_OPR _stc_l,_rlbank,_amrh	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+ OPC_OPR _stc_l,_rlbank,_amrh	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+ OPC_OPR _stc_l,_rlbank,_amrh	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x4:
+ OPC_OPR _rotl,_rh		;ROTL    Rn             0100nnnn00000100
+ OPC_OPR _undef			;?
+ OPC_OPR _rotcl,_rh		;ROTCL   Rn             0100nnnn00100100
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x5:
+ OPC_OPR _rotr,_rh		;ROTR    Rn             0100nnnn00000101
+ OPC_OPR _cmppl,_rh		;CMP/PL  Rn             0100nnnn00010101
+ OPC_OPR _rotcr,_rh		;ROTCR   Rn             0100nnnn00100101
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x6:
+ OPC_OPR _lds_l,_arhp,_mach	;LDS.L   @Rm+,MACH      0100mmmm00000110
+ OPC_OPR _lds_l,_arhp,_macl	;LDS.L   @Rm+,MACL      0100mmmm00010110
+ OPC_OPR _lds_l,_arhp,_pr	;LDS.L   @Rm+,PR        0100mmmm00100110
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _lds_l,_arhp,_fpul	;LDS.L   @Rm+,FPUL      0100mmmm01010110
+ OPC_OPR _lds_l,_arhp,_fpscr	;LDS.L   @Rm+,FPSCR     0100mmmm01100110
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _ldc_l,_arhp,_dbr	;LDC.L   @Rm+,DBR       0100mmmm11110110
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x7:
+ OPC_OPR _ldc_l,_arhp,_sr	;LDC.L   @Rm+,SR        0100mmmm00000111
+ OPC_OPR _ldc_l,_arhp,_gbr	;LDC.L   @Rm+,GBR       0100mmmm00010111
+ OPC_OPR _ldc_l,_arhp,_vbr	;LDC.L   @Rm+,VBR       0100mmmm00100111
+ OPC_OPR _ldc_l,_arhp,_ssr	;LDC.L   @Rm+,SSR       0100mmmm00110111
+ OPC_OPR _ldc_l,_arhp,_spc	;LDC.L   @Rm+,SPC       0100mmmm01000111
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _ldc_l,_arhp,_rlbank	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+ OPC_OPR _ldc_l,_arhp,_rlbank	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+ OPC_OPR _ldc_l,_arhp,_rlbank	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+ OPC_OPR _ldc_l,_arhp,_rlbank	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+ OPC_OPR _ldc_l,_arhp,_rlbank	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+ OPC_OPR _ldc_l,_arhp,_rlbank	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+ OPC_OPR _ldc_l,_arhp,_rlbank	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+ OPC_OPR _ldc_l,_arhp,_rlbank	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x8:
+ OPC_OPR _shll2,_rh		;SHLL2   Rn             0100nnnn00001000
+ OPC_OPR _shll8,_rh		;SHLL8   Rn             0100nnnn00011000
+ OPC_OPR _shll16,_rh		;SHLL16  Rn             0100nnnn00101000
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_x9:
+ OPC_OPR _shlr2,_rh		;SHLR2   Rn             0100nnnn00001001
+ OPC_OPR _shlr8,_rh		;SHLR8   Rn             0100nnnn00011001
+ OPC_OPR _shlr16,_rh		;SHLR16  Rn             0100nnnn00101001
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_xa:
+ OPC_OPR _lds,_rh,_mach		;LDS     Rm,MACH        0100mmmm00001010
+ OPC_OPR _lds,_rh,_macl		;LDS     Rm,MACL        0100mmmm00011010
+ OPC_OPR _lds,_rh,_pr		;LDS     Rm,PR          0100mmmm00101010
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _lds,_rh,_fpul		;LDS     Rm,FPUL        0100mmmm01011010
+ OPC_OPR _lds,_rh,_fpscr	;LDS     Rm,FPSCR       0100mmmm01101010
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _ldc,_rh,_dbr		;LDC     Rm,DBR         0100mmmm11111010
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_xb:
+ OPC_OPR _jsr,_arh,_nul,1	;JSR     @Rn            0100nnnn00001011
+ OPC_OPR _tas_b,_arh		;TAS.B   @Rn            0100nnnn00011011
+ OPC_OPR _jmp,_arh,_nul,1	;JMP     @Rn            0100nnnn00101011
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_4_xe:
+ OPC_OPR _ldc,_rh,_sr		;LDC     Rm,SR          0100mmmm00001110
+ OPC_OPR _ldc,_rh,_gbr		;LDC     Rm,GBR         0100mmmm00011110
+ OPC_OPR _ldc,_rh,_vbr		;LDC     Rm,VBR         0100mmmm00101110
+ OPC_OPR _ldc,_rh,_ssr		;LDC     Rm,SSR         0100mmmm00111110
+ OPC_OPR _ldc,_rh,_spc		;LDC     Rm,SPC         0100mmmm01001110
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _ldc,_rh,_rlbank	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+ OPC_OPR _ldc,_rh,_rlbank	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+ OPC_OPR _ldc,_rh,_rlbank	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+ OPC_OPR _ldc,_rh,_rlbank	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+ OPC_OPR _ldc,_rh,_rlbank	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+ OPC_OPR _ldc,_rh,_rlbank	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+ OPC_OPR _ldc,_rh,_rlbank	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+ OPC_OPR _ldc,_rh,_rlbank	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_f_xd:
+ OPC_OPR _fsts,_fpul,_frh	;FSTS    FPUL,FRn       1111nnnn00001101
+ OPC_OPR _flds,_frh,_fpul	;FLDS    FRm,FPUL       1111mmmm00011101
+ OPC_OPR _float,_fpul,_frh	;FLOAT   FPUL,FRn       1111nnnn00101101
+ OPC_OPR _ftrc,_frh,_fpul	;FTRC    FRm,FPUL       1111mmmm00111101
+ OPC_OPR _fneg,_frh		;FNEG    FRn            1111nnnn01001101
+ OPC_OPR _fabs,_frh		;FABS    FRn            1111nnnn01011101
+ OPC_OPR _fsqrt,_frh		;FSQRT   FRn            1111nnnn01101101
+ OPC_OPR _undef			;?
+ OPC_OPR _fldi0,_frh		;FLDI0   FRn            1111nnnn10001101
+ OPC_OPR _fldi1,_frh		;FLDI1   FRn            1111nnnn10011101
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _fipr,_fvl,_fvh	;FIPR    FVm,FVn        1111nnmm11101101
+	nxt_tbl	op_fxfd
+
+	shx_msk	-4+2,H'04	; ((code) >> 4) << 2) & H'04
+op_f_x0_pr:
+	nxt_tbl	op_fx00_pr
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'04	; ((code) >> 4) << 2) & H'04
+op_f_x1_pr:
+	nxt_tbl	op_fx01_pr
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'04	; ((code) >> 4) << 2) & H'04
+op_f_x2_pr:
+	nxt_tbl	op_fx02_pr
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'04	; ((code) >> 4) << 2) & H'04
+op_f_x3_pr:
+	nxt_tbl	op_fx03_pr
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'04	; ((code) >> 4) << 2) & H'04
+op_f_x4_pr:
+	nxt_tbl	op_fx04_pr
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'04	; ((code) >> 4) << 2) & H'04
+op_f_x5_pr:
+	nxt_tbl	op_fx05_pr
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_f_xd_pr:
+ OPC_OPR _fsts,_fpul,_frh	;FSTS    FPUL,FRn       1111nnnn00001101
+ OPC_OPR _flds,_frh,_fpul	;FLDS    FRm,FPUL       1111mmmm00011101
+	nxt_tbl	op_fx2d_pr
+	nxt_tbl	op_fx3d_pr
+	nxt_tbl	op_fx4d_pr
+	nxt_tbl	op_fx5d_pr
+	nxt_tbl	op_fx6d_pr
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+	nxt_tbl	op_fxad_pr
+	nxt_tbl	op_fxbd_pr
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fx_6_sz:
+ OPC_OPR _fmov,_ar0drl,_drh	;FMOV    @(R0,Rm),DRn   1111nnn0mmmm0110
+ OPC_OPR _fmov,_ar0drl,_xdh	;FMOV    @(R0,Rm),XDn   1111nnn1mmmm0110
+
+	shx_msk	-4+2,H'04	; ((code >> 4) << 2) & H'04
+op_f_x7_sz:
+ OPC_OPR _fmov,_drl,_ar0drh	;FMOV    DRm,@(R0,Rn)   1111nnnnmmm00111
+ OPC_OPR _fmov,_xdl,_ar0drh	;FMOV    XDm,@(R0,Rn)   1111nnnnmmm10111
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fx_8_sz:
+ OPC_OPR _fmov,_arl,_drh	;FMOV    @Rm,DRn        1111nnn0mmmm1000
+ OPC_OPR _fmov,_arl,_xdh	;FMOV    @Rm,XDn        1111nnn1mmmm1000
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fx_9_sz:
+ OPC_OPR _fmov,_arlp,_drh	;FMOV    @Rm+,DRn       1111nnn0mmmm1001
+ OPC_OPR _fmov,_arlp,_xdh	;FMOV    @Rm+,XDn       1111nnn1mmmm1001
+
+	shx_msk	-4+2,H'04	; ((code >> 4) << 2) & H'04
+op_f_xa_sz:
+ OPC_OPR _fmov,_drl,_arh	;FMOV    DRm,@Rn        1111nnnnmmm01010
+ OPC_OPR _fmov,_xdl,_arh	;FMOV    XDm,@Rn        1111nnnnmmm11010
+
+	shx_msk	-4+2,H'04	; ((code >> 4) << 2) & H'04
+op_f_xb_sz:
+ OPC_OPR _fmov,_drl,_amrh	;FMOV    DRm,@-Rn       1111nnnnmmm01011
+ OPC_OPR _fmov,_xdl,_amrh	;FMOV    XDm,@-Rn       1111nnnnmmm11011
+
+	shx_msk	-4+2,H'04	; ((code >> 4) << 2) & H'04
+op_f_xc_sz:
+	nxt_tbl	op_fx0c_sz
+	nxt_tbl	op_fx1c_sz
+
+	;%%%%%%%
+	;% 4th %
+	;%%%%%%%
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_00x8:
+ OPC_OPR _clrt			;CLRT                   0000000000001000
+ OPC_OPR _sett			;SETT                   0000000000011000
+ OPC_OPR _clrmac		;CLRMAC                 0000000000101000
+ OPC_OPR _ldtlb			;LDTLB                  0000000000111000
+ OPC_OPR _clrs			;CLRS                   0000000001001000
+ OPC_OPR _sets			;SETS                   0000000001011000
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'3c	; ((code >> 8) << 2) & H'3c
+op_0x09:
+ OPC_OPR _nop			;NOP                    0000000000001001
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'3c	; ((code >> 8) << 2) & H'3c
+op_0x19:
+ OPC_OPR _div0u			;DIV0U                  0000000000011001
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-4+2,H'3c	; ((code >> 4) << 2) & H'3c
+op_00xb:
+ OPC_OPR _rts,_nul,_nul,1	;RTS                    0000000000001011
+ OPC_OPR _sleep			;SLEEP                  0000000000011011
+ OPC_OPR _rte,_nul,_nul,1	;RTE                    0000000000101011
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'3c	; ((code >> 9) << 2) & H'1c
+op_fxfd:
+ OPC_OPR _undef			;?                            00
+ OPC_OPR _ftrv,_xmtrx,_fvh	;FTRV    XMTRX,FVn      1111nn0111111101
+ OPC_OPR _undef			;?                            10
+ OPC_OPR _fschg			;FSCHG                  1111001111111101
+ OPC_OPR _undef			;?                            00
+ OPC_OPR _ftrv,_xmtrx,_fvh	;FTRV    XMTRX,FVn      1111nn0111111101
+ OPC_OPR _undef			;?                            10
+ OPC_OPR _undef			;?                            11
+ OPC_OPR _undef			;?                            00
+ OPC_OPR _ftrv,_xmtrx,_fvh	;FTRV    XMTRX,FVn      1111nn0111111101
+ OPC_OPR _undef			;?                            10
+ OPC_OPR _frchg			;FRCHG                  1111101111111101
+ OPC_OPR _undef			;?                            00
+ OPC_OPR _ftrv,_xmtrx,_fvh	;FTRV    XMTRX,FVn      1111nn0111111101
+ OPC_OPR _undef			;?                            10
+ OPC_OPR _undef			;?                            11
+
+	shx_msk	-8+2,H'04	; ((code) >> 4) << 2) & H'04
+op_fx00_pr:
+ OPC_OPR _fadd,_drl,_drh	;FADD    DRm,DRn        1111nnn0mmm00000
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code) >> 4) << 2) & H'04
+op_fx01_pr:
+ OPC_OPR _fsub,_drl,_drh	;FSUB    DRm,DRn        1111nnn0mmm00001
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code) >> 4) << 2) & H'04
+op_fx02_pr:
+ OPC_OPR _fmul,_drl,_drh	;FMUL    DRm,DRn        1111nnn0mmm00010
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code) >> 4) << 2) & H'04
+op_fx03_pr:
+ OPC_OPR _fdiv,_drl,_drh	;FDIV    DRm,DRn        1111nnn0mmm00011
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code) >> 4) << 2) & H'04
+op_fx04_pr:
+ OPC_OPR _fcmpeq,_drl,_drh	;FCMP/EQ DRm,DRn        1111nnn0mmm00100
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code) >> 4) << 2) & H'04
+op_fx05_pr:
+ OPC_OPR _fcmpgt,_drl,_drh	;FCMP/GT DRm,DRn        1111nnn0mmm00101
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fx2d_pr:
+ OPC_OPR _float,_fpul,_drh	;FLOAT   FPUL,DRn       1111nnn000101101
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fx3d_pr:
+ OPC_OPR _ftrc,_drh,_fpul	;FTRC    DRm,FPUL       1111mmm000111101
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fx4d_pr:
+ OPC_OPR _fneg,_drh		;FNEG    DRn            1111nnn001001101
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fx5d_pr:
+ OPC_OPR _fabs,_drh		;FABS    DRn            1111nnn001011101
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fx6d_pr:
+ OPC_OPR _fsqrt,_drh		;FSQRT   DRn            1111nnn001101101
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fxad_pr:
+ OPC_OPR _fcnvsd,_fpul,_drh	;FCNVSD  FPUL,DRn       1111nnn010101101
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 8) << 2) & H'04
+op_fxbd_pr:
+ OPC_OPR _fcnvds,_drh,_fpul	;FCNVDS  DRm,FPUL       1111mmm010111101
+ OPC_OPR _undef			;?
+
+	shx_msk	-8+2,H'04	; ((code >> 4) << 2) & H'04
+op_fx0c_sz:
+ OPC_OPR _fmov,_drl,_drh	;FMOV    DRm,DRn        1111nnn0mmm01100
+ OPC_OPR _fmov,_drl,_xdh	;FMOV    DRm,XDn        1111nnn1mmm01100
+
+	shx_msk	-8+2,H'04	; ((code >> 4) << 2) & H'04
+op_fx1c_sz:
+ OPC_OPR _fmov,_xdl,_drh	;FMOV    XDm,DRn        1111nnn0mmm11100
+ OPC_OPR _fmov,_xdl,_xdh	;FMOV    XDm,XDn        1111nnn1mmm11100
+
+opc_str_tbl:
+_undef		.sdataz	"????"
+_add		.sdataz	"ADD"
+_addc		.sdataz	"ADDC"
+_addv		.sdataz	"ADDV"
+_and		.sdataz	"AND"
+_and_b		.sdataz	"AND.B"
+_bf		.sdataz	"BF"
+_bfs		.sdataz	"BF/S"
+_bra		.sdataz	"BRA"
+_braf		.sdataz	"BRAF"
+_bsr		.sdataz	"BSR"
+_bsrf		.sdataz	"BSRF"
+_bt		.sdataz	"BT"
+_bts		.sdataz	"BT/S"
+_clrmac		.sdataz	"CLRMAC"
+_clrs		.sdataz	"CLRS"
+_clrt		.sdataz	"CLRT"
+_cmpeq		.sdataz	"CMP/EQ"
+_cmpge		.sdataz	"CMP/GE"
+_cmpgt		.sdataz	"CMP/GT"
+_cmphi		.sdataz	"CMP/HI"
+_cmphs		.sdataz	"CMP/HS"
+_cmppl		.sdataz	"CMP/PL"
+_cmppz		.sdataz	"CMP/PZ"
+_cmpstr		.sdataz	"CMP/STR"
+_div0s		.sdataz	"DIV0S"
+_div0u		.sdataz	"DIV0U"
+_div1		.sdataz	"DIV1"
+_dmuls_l	.sdataz	"DMULS.L"
+_dmulu_l	.sdataz	"DMULU.L"
+_dt		.sdataz	"DT"
+_exts_b		.sdataz	"EXTS.B"
+_exts_w		.sdataz	"EXTS.W"
+_extu_b		.sdataz	"EXTU.B"
+_extu_w		.sdataz	"EXTU.W"
+_jmp		.sdataz	"JMP"
+_jsr		.sdataz	"JSR"
+_ldc		.sdataz	"LDC"
+_ldc_l		.sdataz	"LDC.L"
+_lds		.sdataz	"LDS"
+_lds_l		.sdataz	"LDS.L"
+_ldtlb		.sdataz	"LDTLB"
+_mac_l		.sdataz	"MAC.L"
+_mac_w		.sdataz	"MAC.W"
+_mov		.sdataz	"MOV"
+_mov_b		.sdataz	"MOV.B"
+_mov_l		.sdataz	"MOV.L"
+_mov_w		.sdataz	"MOV.W"
+_mova		.sdataz	"MOVA"
+_movca_l	.sdataz	"MOVCA.L"
+_movt		.sdataz	"MOVT"
+_mul_l		.sdataz	"MUL.L"
+_muls_w		.sdataz	"MULS.W"
+_mulu_w		.sdataz	"MULU.W"
+_neg		.sdataz	"NEG"
+_negc		.sdataz	"NEGC"
+_nop		.sdataz	"NOP"
+_not		.sdataz	"NOT"
+_ocbi		.sdataz	"OCBI"
+_ocbp		.sdataz	"OCBP"
+_ocbwb		.sdataz	"OCBWB"
+_or		.sdataz	"OR"
+_or_b		.sdataz	"OR.B"
+_pref		.sdataz	"PREF"
+_rotcl		.sdataz	"ROTCL"
+_rotcr		.sdataz	"ROTCR"
+_rotl		.sdataz	"ROTL"
+_rotr		.sdataz	"ROTR"
+_rte		.sdataz	"RTE"
+_rts		.sdataz	"RTS"
+_sets		.sdataz	"SETS"
+_sett		.sdataz	"SETT"
+_shad		.sdataz	"SHAD"
+_shal		.sdataz	"SHAL"
+_shar		.sdataz	"SHAR"
+_shld		.sdataz	"SHLD"
+_shll		.sdataz	"SHLL"
+_shll16		.sdataz	"SHLL16"
+_shll2		.sdataz	"SHLL2"
+_shll8		.sdataz	"SHLL8"
+_shlr		.sdataz	"SHLR"
+_shlr16		.sdataz	"SHLR16"
+_shlr2		.sdataz	"SHLR2"
+_shlr8		.sdataz	"SHLR8"
+_sleep		.sdataz	"SLEEP"
+_stc		.sdataz	"STC"
+_stc_l		.sdataz	"STC.L"
+_sts		.sdataz	"STS"
+_sts_l		.sdataz	"STS.L"
+_sub		.sdataz	"SUB"
+_subc		.sdataz	"SUBC"
+_subv		.sdataz	"SUBV"
+_swap_b		.sdataz	"SWAP.B"
+_swap_w		.sdataz	"SWAP.W"
+_tas_b		.sdataz	"TAS.B"
+_trapa		.sdataz	"TRAPA"
+_tst		.sdataz	"TST"
+_tst_b		.sdataz	"TST.B"
+_xor		.sdataz	"XOR"
+_xor_b		.sdataz	"XOR.B"
+_xtrct		.sdataz	"XTRCT"
+_fadd		.sdataz	"FADD"
+_fsub		.sdataz	"FSUB"
+_fmul		.sdataz	"FMUL"
+_fdiv		.sdataz	"FDIV"
+_fcmpeq		.sdataz	"FCMP/EQ"
+_fcmpgt		.sdataz	"FCMP/GT"
+_fmovs		.sdataz	"FMOV.S"
+_fmov		.sdataz	"FMOV"
+_fmacfr0	.sdataz	"FMAC    FR0,"
+_fsts		.sdataz	"FSTS"
+_flds		.sdataz	"FLDS"
+_float		.sdataz	"FLOAT"
+_ftrc		.sdataz	"FTRC"
+_fneg		.sdataz	"FNEG"
+_fabs		.sdataz	"FABS"
+_fsqrt		.sdataz	"FSQRT"
+_fldi0		.sdataz	"FLDI0"
+_fldi1		.sdataz	"FLDI1"
+_fipr		.sdataz	"FIPR"
+_ftrv		.sdataz	"FTRV"
+_fschg		.sdataz	"FSCHG"
+_frchg		.sdataz	"FRCHG"
+_fcnvsd		.sdataz	"FCNVSD"
+_fcnvds		.sdataz	"FCNVDS"
+	.align	8
+
+	.macro	OPR_DSP dsp
+_\dsp	.equ	($-opr_dsp_tbl)/8
+	.data.l	\dsp'_dsp
+	.data.l	\dsp'_str
+	.endm
+
+opr_dsp_tbl:
+	OPR_DSP	nul
+	OPR_DSP	rl
+	OPR_DSP ad4lrh
+	OPR_DSP	ad4lrl
+	OPR_DSP	rh
+	OPR_DSP	i8
+	OPR_DSP	ad8wpc
+	OPR_DSP	l12
+	OPR_DSP	ad8lpc
+	OPR_DSP	ar0brh
+	OPR_DSP	ar0wrh
+	OPR_DSP	ar0lrh
+	OPR_DSP	ar0brl
+	OPR_DSP	ar0wrl
+	OPR_DSP	ar0lrl
+	OPR_DSP	arlp
+	OPR_DSP	arhp
+	OPR_DSP	arh
+	OPR_DSP	amrh
+	OPR_DSP	arl
+	OPR_DSP	ad4brl
+	OPR_DSP	ad4wrl
+	OPR_DSP	r0
+	OPR_DSP	l8
+	OPR_DSP	ad8bgbr
+	OPR_DSP	ad8wgbr
+	OPR_DSP	ad8lgbr
+	OPR_DSP	ad8pc
+	OPR_DSP	ar0gbr
+	OPR_DSP	sr
+	OPR_DSP	gbr
+	OPR_DSP	vbr
+	OPR_DSP	ssr
+	OPR_DSP	spc
+	OPR_DSP	rlbank
+	OPR_DSP	mach
+	OPR_DSP	macl
+	OPR_DSP	pr
+	OPR_DSP	sgr
+	OPR_DSP	dbr
+	OPR_DSP	fpul
+	OPR_DSP	fpscr
+	OPR_DSP	frl
+	OPR_DSP	frh
+	OPR_DSP	ar0srl
+	OPR_DSP	ar0srh
+	OPR_DSP	fvl
+	OPR_DSP	fvh
+	OPR_DSP	ar0drl
+	OPR_DSP	ar0drh
+	OPR_DSP	drl
+	OPR_DSP	drh
+	OPR_DSP	xdl
+	OPR_DSP	xdh
+	OPR_DSP	xmtrx
+
+nul_str:
+	.sdataz	" "			;s
+rh_str:
+rl_str:
+	.sdataz	"R"			;sR
+ad4lrh_str:
+ad4lrl_str:
+	.sdataz	"@(H'"<0>",R"<0>")"	;s2sRs
+i8_str:
+	.sdataz	"#H'"<0>		;s2
+ad8wpc_str:
+ad8lpc_str:
+	.sdataz	"@(H'"<0>",PC)=#H'"	;s?s4,s?s8
+ad8pc_str:
+	.sdataz	"@(H'"<0>",PC)"		;s?s
+l12_str:
+l8_str:
+	.sdataz	"H'"			;s?
+ar0brh_str:
+ar0wrh_str:
+ar0lrh_str:
+ar0srh_str:
+ar0drh_str:
+ar0brl_str:
+ar0wrl_str:
+ar0lrl_str:
+ar0srl_str:
+ar0drl_str:
+	.sdataz	"@(R0,R"<0>")"		;sRs
+arhp_str:
+arlp_str:
+	.sdataz	"@R"<0>"+"		;sRs
+arh_str:
+arl_str:
+	.sdataz	"@R"			;sR
+amrh_str:
+	.sdataz	"@-R"			;sR
+ad4brl_str:
+ad4wrl_str:
+	.sdataz	"@(H'"<0>",R"<0>")"	;s2sRs
+r0_str:
+	.sdataz	"R0"			;s
+ad8bgbr_str:
+ad8wgbr_str:
+ad8lgbr_str:
+	.sdataz	"@(H'"<0>",GBR)"	;s3s
+rlbank_str:
+	.sdataz	"R"<0>"_BANK"		;s1s
+ar0gbr_str:
+	.sdataz	"@(R0,GBR)"		;s
+sr_str:
+	.sdataz	"SR"			;s
+gbr_str:
+	.sdataz	"GBR"			;s
+vbr_str:
+	.sdataz	"VBR"			;s
+ssr_str:
+	.sdataz	"SSR"			;s
+spc_str:
+	.sdataz	"SPC"			;s
+mach_str:
+	.sdataz	"MACH"			;s
+macl_str:
+	.sdataz	"MACL"			;s
+pr_str:
+	.sdataz	"PR"			;s
+sgr_str:
+	.sdataz	"SGR"			;s
+dbr_str:
+	.sdataz	"DBR"			;s
+fpul_str:
+	.sdataz	"FPUL"			;s
+fpscr_str:
+	.sdataz	"FPSCR"			;s
+frl_str:
+frh_str:
+	.sdataz	"FR"			;sR
+fvl_str:
+fvh_str:
+	.sdataz	"FV"			;sR
+drl_str:
+drh_str:
+	.sdataz	"DR"			;sR
+xdl_str:
+xdh_str:
+	.sdataz	"XD"			;sR
+xmtrx_str:
+	.sdataz	"XMTRX"			;s
+	.align	8
+
+ .aif 1 EQ 0
+	.export	check_code, check_code_e
+check_code
+	MOV	#H'12,R0	;MOV     #imm,Rn        1110nnnniiiiiiii
+	MOV.W	@(2,PC),R1	;MOV.W   @(disp,PC),Rn  1001nnnndddddddd
+	MOV.L	@(4,PC),R2	;MOV.L   @(disp,PC),Rn  1101nnnndddddddd
+	MOV	R3,R4		;MOV     Rm,Rn          0110nnnnmmmm0011
+	MOV.B	R5,@R6		;MOV.B   Rm,@Rn         0010nnnnmmmm0000
+	MOV.W	R7,@R8		;MOV.W   Rm,@Rn         0010nnnnmmmm0001
+	MOV.L	R9,@R10		;MOV.L   Rm,@Rn         0010nnnnmmmm0010
+	MOV.B	@R11,R12	;MOV.B   @Rm,Rn         0110nnnnmmmm0000
+	MOV.W	@R13,R14	;MOV.W   @Rm,Rn         0110nnnnmmmm0001
+	MOV.L	@R15,R0		;MOV.L   @Rm,Rn         0110nnnnmmmm0010
+	MOV.B	R1,@-R2		;MOV.B   Rm,@-Rn        0010nnnnmmmm0100
+	MOV.W	R3,@-R4		;MOV.W   Rm,@-Rn        0010nnnnmmmm0101
+	MOV.L	R5,@-R6		;MOV.L   Rm,@-Rn        0010nnnnmmmm0110
+	MOV.B	@R7+,R8		;MOV.B   @Rm+,Rn        0110nnnnmmmm0100
+	MOV.W	@R9+,R10	;MOV.W   @Rm+,Rn        0110nnnnmmmm0101
+	MOV.L	@R11+,R12	;MOV.L   @Rm+,Rn        0110nnnnmmmm0110
+	MOV.B	R0,@(1,R13)	;MOV.B   R0,@(disp,Rn)  10000000nnnndddd
+	MOV.W	R0,@(2,R14)	;MOV.W   R0,@(disp,Rn)  10000001nnnndddd
+	MOV.L	R0,@(4,R15)	;MOV.L   Rm,@(disp,Rn)  0001nnnnmmmmdddd
+	MOV.B	@(1,R0),R0	;MOV.B   @(disp,Rm),R0  10000100mmmmdddd
+	MOV.W	@(2,R1),R0	;MOV.W   @(disp,Rm),R0  10000101mmmmdddd
+	MOV.L	@(4,R2),R0	;MOV.L   @(disp,Rm),Rn  0101nnnnmmmmdddd
+	MOV.B	R3,@(R0,R4)	;MOV.B   Rm,@(R0,Rn)    0000nnnnmmmm0100
+	MOV.W	R5,@(R0,R6)	;MOV.W   Rm,@(R0,Rn)    0000nnnnmmmm0101
+	MOV.L	R7,@(R0,R8)	;MOV.L   Rm,@(R0,Rn)    0000nnnnmmmm0110
+	MOV.B	@(R0,R9),R10	;MOV.B   @(R0,Rm),Rn    0000nnnnmmmm1100
+	MOV.W	@(R0,R11),R12	;MOV.W   @(R0,Rm),Rn    0000nnnnmmmm1101
+	MOV.L	@(R0,R13),R14	;MOV.L   @(R0,Rm),Rn    0000nnnnmmmm1110
+	MOV.B	R0,@(1,GBR)	;MOV.B   R0,@(disp,GBR) 11000000dddddddd
+	MOV.W	R0,@(2,GBR)	;MOV.W   R0,@(disp,GBR) 11000001dddddddd
+	MOV.L	R0,@(4,GBR)	;MOV.L   R0,@(disp,GBR) 11000010dddddddd
+	MOV.B	@(1,GBR),R0	;MOV.B   @(disp,GBR),R0 11000100dddddddd
+	MOV.W	@(2,GBR),R0	;MOV.W   @(disp,GBR),R0 11000101dddddddd
+	MOV.L	@(4,GBR),R0	;MOV.L   @(disp,GBR),R0 11000110dddddddd
+	MOVA	@(4,PC),R0	;MOVA    @(disp,PC),R0  11000111dddddddd
+	MOVT	R15		;MOVT    Rn             0000nnnn00101001
+	SWAP.B	R0,R1		;SWAP.B  Rm,Rn          0110nnnnmmmm1000
+	SWAP.W	R2,R3		;SWAP.W  Rm,Rn          0110nnnnmmmm1001
+	XTRCT	R4,R5		;XTRCT   Rm,Rn          0010nnnnmmmm1101
+	ADD	R6,R7		;ADD     Rm,Rn          0011nnnnmmmm1100
+	ADD	#H'12,R8	;ADD     #imm,Rn        0111nnnniiiiiiii
+	ADDC	R9,R10		;ADDC    Rm,Rn          0011nnnnmmmm1110
+	ADDV	R11,R12		;ADDV    Rm,Rn          0011nnnnmmmm1111
+	CMP/EQ	#H'12,R0	;CMP/EQ  #imm,R0        10001000iiiiiiii
+	CMP/EQ	R13,R14		;CMP/EQ  Rm,Rn          0011nnnnmmmm0000
+	CMP/HS	R15,R0		;CMP/HS  Rm,Rn          0011nnnnmmmm0010
+	CMP/GE	R1,R2		;CMP/GE  Rm,Rn          0011nnnnmmmm0011
+	CMP/HI	R3,R4		;CMP/HI  Rm,Rn          0011nnnnmmmm0110
+	CMP/GT	R5,R6		;CMP/GT  Rm,Rn          0011nnnnmmmm0111
+	CMP/PZ	R7		;CMP/PZ  Rn             0100nnnn00010001
+	CMP/PL	R8		;CMP/PL  Rn             0100nnnn00010101
+	CMP/STR	R9,R10		;CMP/STR Rm,Rn          0010nnnnmmmm1100
+	DIV1	R11,R12		;DIV1    Rm,Rn          0011nnnnmmmm0100
+	DIV0S	R13,R14		;DIV0S   Rm,Rn          0010nnnnmmmm0111
+	DIV0U			;DIV0U                  0000000000011001
+	DMULS.L	R15,R0		;DMULS.L Rm,Rn          0011nnnnmmmm1101
+	DMULU.L	R1,R2		;DMULU.L Rm,Rn          0011nnnnmmmm0101
+	DT	R3		;DT      Rn             0100nnnn00010000
+	EXTS.B	R4,R5		;EXTS.B  Rm,Rn          0110nnnnmmmm1110
+	EXTS.W	R6,R7		;EXTS.W  Rm,Rn          0110nnnnmmmm1111
+	EXTU.B	R8,R9		;EXTU.B  Rm,Rn          0110nnnnmmmm1100
+	EXTU.W	R10,R11		;EXTU.W  Rm,Rn          0110nnnnmmmm1101
+	MAC.L	@R12+,@R13+	;MAC.L   @Rm+,@Rn+      0000nnnnmmmm1111
+	MAC.W	@R14+,@R15+	;MAC.W   @Rm+,@Rn+      0100nnnnmmmm1111
+	MUL.L	R0,R1		;MUL.L   Rm,Rn          0000nnnnmmmm0111
+	MULS.W	R2,R3		;MULS.W  Rm,Rn          0010nnnnmmmm1111
+	MULU.W	R4,R5		;MULU.W  Rm,Rn          0010nnnnmmmm1110
+	NEG	R6,R7		;NEG     Rm,Rn          0110nnnnmmmm1011
+	NEGC	R8,R9		;NEGC    Rm,Rn          0110nnnnmmmm1010
+	SUB	R10,R11		;SUB     Rm,Rn          0011nnnnmmmm1000
+	SUBC	R12,R13		;SUBC    Rm,Rn          0011nnnnmmmm1010
+	SUBV	R14,R15		;SUBV    Rm,Rn          0011nnnnmmmm1011
+	AND	R0,R1		;AND     Rm,Rn          0010nnnnmmmm1001
+	AND	#H'12,R0	;AND     #imm,R0        11001001iiiiiiii
+	AND.B	#H'12,@(R0,GBR)	;AND.B   #imm,@(R0,GBR) 11001101iiiiiiii
+	NOT	R2,R3		;NOT     Rm,Rn          0110nnnnmmmm0111
+	OR	R4,R5		;OR      Rm,Rn          0010nnnnmmmm1011
+	OR	#H'12,R0	;OR      #imm,R0        11001011iiiiiiii
+	OR.B	#H'12,@(R0,GBR)	;OR.B    #imm,@(R0,GBR) 11001111iiiiiiii
+	TAS.B	@R6		;TAS.B   @Rn            0100nnnn00011011
+	TST	R7,R8		;TST     Rm,Rn          0010nnnnmmmm1000
+	TST	#H'12,R0	;TST     #imm,R0        11001000iiiiiiii
+	TST.B	#H'12,@(R0,GBR)	;TST.B   #imm,@(R0,GBR) 11001100iiiiiiii
+	XOR	R9,R10		;XOR     Rm,Rn          0010nnnnmmmm1010
+	XOR	#H'12,R0	;XOR     #imm,R0        11001010iiiiiiii
+	XOR.B	#H'12,@(R0,GBR)	;XOR.B   #imm,@(R0,GBR) 11001110iiiiiiii
+	ROTL	R11		;ROTL    Rn             0100nnnn00000100
+	ROTR	R12		;ROTR    Rn             0100nnnn00000101
+	ROTCL	R13		;ROTCL   Rn             0100nnnn00100100
+	ROTCR	R14		;ROTCR   Rn             0100nnnn00100101
+	SHAD	R15,R0		;SHAD    Rm,Rn          0100nnnnmmmm1100
+	SHAL	R1		;SHAL    Rn             0100nnnn00100000
+	SHAR	R2		;SHAR    Rn             0100nnnn00100001
+	SHLD	R3,R4		;SHLD    Rm,Rn          0100nnnnmmmm1101
+	SHLL	R5		;SHLL    Rn             0100nnnn00000000
+	SHLR	R6		;SHLR    Rn             0100nnnn00000001
+	SHLL2	R7		;SHLL2   Rn             0100nnnn00001000
+	SHLR2	R8		;SHLR2   Rn             0100nnnn00001001
+	SHLL8	R9		;SHLL8   Rn             0100nnnn00011000
+	SHLR8	R10		;SHLR8   Rn             0100nnnn00011001
+	SHLL16	R11		;SHLL16  Rn             0100nnnn00101000
+	SHLR16	R12		;SHLR16  Rn             0100nnnn00101001
+	BF	$		;BF      label          10001011dddddddd
+	BF/S	$		;BF/S    label          10001111dddddddd
+	nop
+	BT	$		;BT      label          10001001dddddddd
+	BT/S	$		;BT/S    label          10001101dddddddd
+	nop
+	BRA	$		;BRA     label          1010dddddddddddd
+	nop
+	BRAF	R13		;BRAF    Rn             0000nnnn00100011
+	nop
+	BSR	$		;BSR     label          1011dddddddddddd
+	nop
+	BSRF	R14		;BSRF    Rn             0000nnnn00000011
+	nop
+	JMP	@R15		;JMP     @Rn            0100nnnn00101011
+	nop
+	JSR	@R0		;JSR     @Rn            0100nnnn00001011
+	nop
+	RTS			;RTS                    0000000000001011
+	nop
+	CLRMAC			;CLRMAC                 0000000000101000
+	CLRS			;CLRS                   0000000001001000
+	CLRT			;CLRT                   0000000000001000
+	LDC	R1,SR		;LDC     Rm,SR          0100mmmm00001110
+	LDC	R2,GBR		;LDC     Rm,GBR         0100mmmm00011110
+	LDC	R3,VBR		;LDC     Rm,VBR         0100mmmm00101110
+	LDC	R4,SSR		;LDC     Rm,SSR         0100mmmm00111110
+	LDC	R5,SPC		;LDC     Rm,SPC         0100mmmm01001110
+	LDC	R6,DBR		;LDC     Rm,DBR         0100mmmm11111010
+	LDC	R7,R2_BANK	;LDC     Rm,Rn_BANK     0100mmmm1nnn1110
+	LDC.L	@R8+,SR		;LDC.L   @Rm+,SR        0100mmmm00000111
+	LDC.L	@R9+,GBR	;LDC.L   @Rm+,GBR       0100mmmm00010111
+	LDC.L	@R10+,VBR	;LDC.L   @Rm+,VBR       0100mmmm00100111
+	LDC.L	@R11+,SSR	;LDC.L   @Rm+,SSR       0100mmmm00110111
+	LDC.L	@R12+,SPC	;LDC.L   @Rm+,SPC       0100mmmm01000111
+	LDC.L	@R13+,DBR	;LDC.L   @Rm+,DBR       0100mmmm11110110
+	LDC.L	@R14+,R5_BANK	;LDC.L   @Rm+,Rn_BANK   0100mmmm1nnn0111
+	LDS	R0,MACH		;LDS     Rm,MACH        0100mmmm00001010
+	LDS	R1,MACL		;LDS     Rm,MACL        0100mmmm00011010
+	LDS	R2,PR		;LDS     Rm,PR          0100mmmm00101010
+	LDS.L	@R3+,MACH	;LDS.L   @Rm+,MACH      0100mmmm00000110
+	LDS.L	@R4+,MACL	;LDS.L   @Rm+,MACL      0100mmmm00010110
+	LDS.L	@R5+,PR		;LDS.L   @Rm+,PR        0100mmmm00100110
+	LDTLB			;LDTLB                  0000000000111000
+	MOVCA.L	R0,@R6		;MOVCA.L R0,@Rn         0000nnnn11000011
+	NOP			;NOP                    0000000000001001
+	OCBI	@R7		;OCBI    @Rn            0000nnnn10010011
+	OCBP	@R8		;OCBP    @Rn            0000nnnn10100011
+	OCBWB	@R9		;OCBWB   @Rn            0000nnnn10110011
+	PREF	@R10		;PREF    @Rn            0000nnnn10000011
+	RTE			;RTE                    0000000000101011
+	nop
+	SETS			;SETS                   0000000001011000
+	SETT			;SETT                   0000000000011000
+	SLEEP			;SLEEP                  0000000000011011
+	STC	SR,R11		;STC     SR,Rn          0000nnnn00000010
+	STC	GBR,R12		;STC     GBR,Rn         0000nnnn00010010
+	STC	VBR,R13		;STC     VBR,Rn         0000nnnn00100010
+	STC	SSR,R14		;STC     SSR,Rn         0000nnnn00110010
+	STC	SPC,R15		;STC     SPC,Rn         0000nnnn01000010
+	STC	SGR,R0		;STC     SGR,Rn         0000nnnn00111010
+	STC	DBR,R1		;STC     DBR,Rn         0000nnnn11111010
+	STC	R2_BANK,R3	;STC     Rm_BANK,Rn     0000nnnn1mmm0010
+	STC.L	SR,@-R4		;STC.L   SR,@-Rn        0100nnnn00000011
+	STC.L	GBR,@-R5	;STC.L   GBR,@-Rn       0100nnnn00010011
+	STC.L	VBR,@-R6	;STC.L   VBR,@-Rn       0100nnnn00100011
+	STC.L	SSR,@-R7	;STC.L   SSR,@-Rn       0100nnnn00110011
+	STC.L	SPC,@-R8	;STC.L   SPC,@-Rn       0100nnnn01000011
+	STC.L	SGR,@-R9	;STC.L   SGR,@-Rn       0100nnnn00110010
+	STC.L	DBR,@-R10	;STC.L   DBR,@-Rn       0100nnnn11110010
+	STC.L	R1_BANK,@-R12	;STC.L   Rm_BANK,@-Rn   0100nnnn1mmm0011
+	STS	MACH,R13	;STS     MACH,Rn        0000nnnn00001010
+	STS	MACL,R14	;STS     MACL,Rn        0000nnnn00011010
+	STS	PR,R15		;STS     PR,Rn          0000nnnn00101010
+	STS.L	MACH,@-R0	;STS.L   MACH,@-Rn      0100nnnn00000010
+	STS.L	MACL,@-R1	;STS.L   MACL,@-Rn      0100nnnn00010010
+	STS.L	PR,@-R2		;STS.L   PR,@-Rn        0100nnnn00100010
+	TRAPA	#H'12		;TRAPA   #imm           11000011iiiiiiii
+check_code_e
+ .aendi
+
+ .aif 1 EQ 0
+	.export	check_codef, check_codef_e
+check_codef
+	FADD	FR0,FR1		;FADD    FRm,FRn        1111nnnnmmmm0000
+	FSUB	FR2,FR3		;FSUB    FRm,FRn        1111nnnnmmmm0001
+	FMUL	FR4,FR5		;FMUL    FRm,FRn        1111nnnnmmmm0010
+	FDIV	FR6,FR7		;FDIV    FRm,FRn        1111nnnnmmmm0011
+	FCMP/EQ	FR8,FR9		;FCMP/EQ FRm,FRn        1111nnnnmmmm0100
+	FCMP/GT	FR10,FR11	;FCMP/GT FRm,FRn        1111nnnnmmmm0101
+	FMOV.S	@(R0,R12),FR13	;FMOV.S  @(R0,Rm),FRn   1111nnnnmmmm0110
+	FMOV.S	FR14,@(R0,R15)	;FMOV.S  FRm,@(R0,Rn)   1111nnnnmmmm0111
+	FMOV.S	@R0,FR1		;FMOV.S  @Rm,FRn        1111nnnnmmmm1000
+	FMOV.S	@R2+,FR3	;FMOV.S  @Rm+,FRn       1111nnnnmmmm1001
+	FMOV.S	FR4,@R5		;FMOV.S  FRm,@Rn        1111nnnnmmmm1010
+	FMOV.S	FR6,@-R7	;FMOV.S  FRm,@-Rn       1111nnnnmmmm1011
+	FMOV	FR8,FR9		;FMOV    FRm,FRn        1111nnnnmmmm1100
+	FSTS	FPUL,FR10	;FSTS    FPUL,FRn       1111nnnn00001101
+	FLDS	FR11,FPUL	;FLDS    FRm,FPUL       1111mmmm00011101
+	FLOAT	FPUL,FR12	;FLOAT   FPUL,FRn       1111nnnn00101101
+	FTRC	FR13,FPUL	;FTRC    FRm,FPUL       1111mmmm00111101
+	FNEG	FR14		;FNEG    FRn            1111nnnn01001101
+	FABS	FR15		;FABS    FRn            1111nnnn01011101
+	FSQRT	FR0		;FSQRT   FRn            1111nnnn01101101
+	FLDI0	FR1		;FLDI0   FRn            1111nnnn10001101
+	FLDI1	FR2		;FLDI1   FRn            1111nnnn10011101
+	FIPR	FV4,FV8		;FIPR    FVm,FVn        1111nnmm11101101
+	FTRV	XMTRX,FV12	;FTRV    XMTRX,FVn      1111nn0111111101
+	FSCHG			;FSCHG                  1111001111111101
+	FRCHG			;FRCHG                  1111101111111101
+	FMAC	FR0,FR1,FR2	;FMAC    FR0,FRm,FRn    1111nnnnmmmm1110
+	FADD	DR4,DR6		;FADD    DRm,DRn        1111nnn0mmm00000
+	FSUB	DR8,DR10	;FSUB    DRm,DRn        1111nnn0mmm00001
+	FMUL	DR12,DR14	;FMUL    DRm,DRn        1111nnn0mmm00010
+	FDIV	DR0,DR2		;FDIV    DRm,DRn        1111nnn0mmm00011
+	FCMP/EQ	DR4,DR6		;FCMP/EQ DRm,DRn        1111nnn0mmm00100
+	FCMP/GT	DR8,DR10	;FCMP/GT DRm,DRn        1111nnn0mmm00101
+	FMOV	@(R0,R11),DR12	;FMOV    @(R0,Rm),DRn   1111nnn0mmmm0110
+	FMOV	@(R0,R13),XD14	;FMOV    @(R0,Rm),XDn   1111nnn1mmmm0110
+	FMOV	DR0,@(R0,R1)	;FMOV    DRm,@(R0,Rn)   1111nnnnmmm00111
+	FMOV	XD2,@(R0,R3)	;FMOV    XDm,@(R0,Rn)   1111nnnnmmm10111
+	FMOV	@R4,DR6		;FMOV    @Rm,DRn        1111nnn0mmmm1000
+	FMOV	@R7,XD8		;FMOV    @Rm,XDn        1111nnn1mmmm1000
+	FMOV	@R9+,DR10	;FMOV    @Rm+,DRn       1111nnn0mmmm1001
+	FMOV	@R11+,XD12	;FMOV    @Rm+,XDn       1111nnn1mmmm1001
+	FMOV	DR14,@R15	;FMOV    DRm,@Rn        1111nnnnmmm01010
+	FMOV	XD0,@R1		;FMOV    XDm,@Rn        1111nnnnmmm11010
+	FMOV	DR2,@-R3	;FMOV    DRm,@-Rn       1111nnnnmmm01011
+	FMOV	XD4,@-R5	;FMOV    XDm,@-Rn       1111nnnnmmm11011
+	FMOV	DR6,DR8		;FMOV    DRm,DRn        1111nnn0mmm01100
+	FMOV	DR10,XD12	;FMOV    DRm,XDn        1111nnn1mmm01100
+	FMOV	XD14,DR0	;FMOV    XDm,DRn        1111nnn0mmm11100
+	FMOV	XD2,XD4		;FMOV    XDm,XDn        1111nnn1mmm11100
+	FLOAT	FPUL,DR6	;FLOAT   FPUL,DRn       1111nnn000101101
+	FTRC	DR8,FPUL	;FTRC    DRm,FPUL       1111mmm000111101
+	FNEG	DR10		;FNEG    DRn            1111nnn001001101
+	FABS	DR12		;FABS    DRn            1111nnn001011101
+	FSQRT	DR14		;FSQRT   DRn            1111nnn001101101
+	FCNVSD	FPUL,DR0	;FCNVSD  FPUL,DRn       1111nnn010101101
+	FCNVDS	DR2,FPUL	;FCNVDS  DRm,FPUL       1111mmm010111101
+	STS.L	FPUL,@-R3	;STS.L   FPUL,@-Rn      0100nnnn01010010
+	STS.L	FPSCR,@-R4	;STS.L   FPSCR,@-Rn     0100nnnn01100010
+	LDS.L	@R5+,FPUL	;LDS.L   @Rm+,FPUL      0100mmmm01010110
+	LDS.L	@R6+,FPSCR	;LDS.L   @Rm+,FPSCR     0100mmmm01100110
+	LDS	R7,FPUL		;LDS     Rm,FPUL        0100mmmm01011010
+	LDS	R8,FPSCR	;LDS     Rm,FPSCR       0100mmmm01101010
+	STS	FPUL,R9		;STS     FPUL,Rn        0000nnnn01011010
+	STS	FPUL,R10	;STS     FPSCR,Rn       0000nnnn01101010
+check_codef_e
+ .aendi
+
+	.end
+

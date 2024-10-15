@@ -1,0 +1,221 @@
+;
+;	Program	__WCHSIZ.SRC
+;	Date	2001/11/11 .. 2001/1/12
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf, dbg_chk_rxd_buf, dbg_puts, dbg_putc_db
+	.import	dbg_dmp_siz_hex
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_chk_rxd_buf_sub
+	branch	dbg_chk_rxd_buf
+
+dbg_puts_sub
+	branch	dbg_puts
+
+dbg_putc_db_sub
+	branch	dbg_putc_db
+
+dbg_dmp_siz_hex_sub
+	branch	dbg_dmp_siz_hex
+
+	;/////////////////////////
+	;/// watch memory size ///
+	;/////////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_wch_siz
+dbg_wch_siz:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_wch_siz_scn,r1
+	bsr	dbg_scanf_sub
+	add	#-4,sp		;!
+	;
+	bf	dbg_wch_siz_4b	; error !
+	tst	r1,r1
+	bt	dbg_wch_siz_4a	; size zero !
+	push	r0		;!!
+	mov.l	@(4,sp),r0	;!
+	push	r0		;!!!
+	cmp/eq	#0,r0
+	bt	dbg_wch_siz_4	; wide zero !
+	cmp/hs	r0,r1
+	bt	dbg_wch_siz_0	; size >= wide !
+	mov	r1,r0
+	mov.l	r0,@sp		;!!!
+dbg_wch_siz_0
+	shlr8	r0
+	cmp/eq	#0,r0
+	bf	dbg_wch_siz_4	; wide > 255 !
+	mov	#0,r0
+	mov.l	r0,@(8,sp)	;!
+	mov.l	@(4,sp),r0	;!!
+	add	r0,r1
+	add	#-1,r1		; r0=start, r1=end
+	;r1=end,r0=start,@sp=wide,@sp+4=start keep,@sp+8=count
+dbg_wch_siz_1
+	bsr	dbg_chk_rxd_buf_sub	;<ent> none. <ret> T=1:data in
+	push	r0		;!!!!
+	;
+	pop	r0		;!!!!
+	bt	dbg_wch_siz_3	; break !
+	bsr	dbg_dmp_siz_hex_sub	;<ent> r0=start,r1=end,@sp=wide
+	nop
+	;
+	push	r1		;!!!!
+	push	r0		;!!!!!
+	bf	dbg_wch_siz_2	; end !
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	mov.l	@(8+8,sp),r0
+	bsr	dbg_wch_siz_inc	; r0=count, r1=wide
+	mov.l	@(8,sp),r1
+	;
+	mov.l	r0,@(8+8,sp)
+	pop	r0		;!!!!!
+	mov.l	@(4,sp),r1
+	add	r1,r0
+	bra	dbg_wch_siz_1
+	pop	r1		;!!!!
+	;
+dbg_wch_siz_2
+	mov.l	@(8+8,sp),r0
+	swap.b	r0,r1
+	cmp/eq	r0,r1
+	bf	dbg_wch_siz_2a
+	mov.l	@sp,r0		;!!!!!
+	mov.l	@(4,sp),r1	;!!!!
+	sub	r0,r1
+	bsr	dbg_wch_siz_inc	; r0=count, r1=wide
+	mov.l	@(8+8,sp),r0
+	;
+	swap.b	r0,r0	; must be -1 !
+	add	#-1,r0	;
+	swap.b	r0,r0	;
+	mov.l	r0,@(8+8,sp)
+dbg_wch_siz_2a
+	mov	r0,r1
+	mov	#24,r0
+	shll8	r0
+	cmp/hs	r0,r1
+	bt	dbg_wch_siz_2c
+	bsr	dbg_putc_sub
+	mov	#H'0d,r0
+	;
+	swap.b	r1,r0
+	extu.b	r0,r0
+	cmp/eq	#0,r0
+	bt	dbg_wch_siz_2b
+	push	r0		;!!!!!!
+	mov.l	#dbg_wch_siz_rep,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	bsr	dbg_putc_db_sub
+	mov.l	@sp,r0
+	;
+	bsr	dbg_puts_sub
+	nop
+	;
+	pop	r0		;!!!!!!
+dbg_wch_siz_2b
+	shll8	r0
+	mov.l	r0,@(8+8,sp)
+	add	#4,sp		;!!!!!
+	pop	r1		;!!!!
+	bra	dbg_wch_siz_1
+	mov.l	@(4,sp),r0
+	;
+dbg_wch_siz_2c
+	bra	dbg_wch_siz_3b
+	add	#8,sp		;!!!!!,!!!!
+	;
+dbg_wch_siz_3
+	mov.l	@(8,sp),r0
+dbg_wch_siz_3a
+	swap.b	r0,r1
+	cmp/eq	r0,r1
+	bt	dbg_wch_siz_3b
+	mov	r0,r1
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	mov	r1,r0
+	bra	dbg_wch_siz_3a
+	add	#1,r0
+	;
+dbg_wch_siz_3b
+	bra	dbg_wch_siz_4b
+	add	#8,sp		;!!!,!!
+	;
+dbg_wch_siz_4
+	add	#8,sp		;!!!,!!
+dbg_wch_siz_4a
+	clrt
+dbg_wch_siz_4b
+	add	#4,sp		;!
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_wch_siz_inc
+	push	r1	;!
+	swap.b	r0,r1
+	cmp/eq	r1,r0
+	pop	r1	;!
+	bf	dbg_wch_siz_inc_1
+	;* high and low *
+dbg_wch_siz_inc_0
+	add	#1,r0
+	swap.b	r0,r0
+	add	#1,r0
+	swap.b	r0,r0
+	add	#-32,r1
+	cmp/pl	r1
+	bt	dbg_wch_siz_inc_0
+	bra	dbg_wch_siz_inc_2
+	nop
+	;* low *
+dbg_wch_siz_inc_1
+	add	#1,r0
+	add	#-32,r1
+	cmp/pl	r1
+	bt	dbg_wch_siz_inc_1
+dbg_wch_siz_inc_2
+	rts
+	nop
+dbg_wch_siz_scn
+	.sdataz	"%x,%x,%x\r"
+dbg_wch_siz_rep
+	.sdataz <H'1b>"["<0>"A"	; cursor n line up
+	.align	8
+
+	.end
+

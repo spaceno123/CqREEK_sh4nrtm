@@ -1,0 +1,377 @@
+;
+;	Program	__CHNMSZ.SRC
+;	Date	2001/9/22 .. 2001/9/23
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/9/24	export dbg_chn_msz_get
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf, dbg_puthn, dbg_getc, dbg_hex_to_bin
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_puthn_sub
+	branch	dbg_puthn
+
+dbg_getc_sub
+	branch	dbg_getc
+
+dbg_hex_to_bin_sub
+	branch	dbg_hex_to_bin
+
+	;//////////////////////////
+	;/// change memory size ///
+	;//////////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_chn_msz
+dbg_chn_msz:
+	sts.l	pr,@-sp	;!
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_chn_msz_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_chn_msz_1b	; error !
+	push	r1	;!!	; size !
+	push	r0	;!!!	; address !
+	tst	r1,r1
+	bt	dbg_chn_msz_1	; error !
+	mov	#8,r0
+	cmp/hi	r0,r1
+	bt	dbg_chn_msz_1	; error !
+dbg_chn_msz_0
+	mov.l	@sp,r0	;!!!
+	bsr	dbg_puthn_sub
+	mov	#8,r1
+	;
+	bsr	dbg_putc_sub	; space
+	mov	#" ",r0
+	;
+	mov.l	@(4,sp),r1	;!!
+	bsr	dbg_chn_msz_dsp	;<ent> r0=address, r1=size(1..8)
+	mov.l	@sp,r0	;!!!
+	;
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	bsr	dbg_chn_msz_get	;<ent> r0=size <ret>r1:r0
+	mov.l	@(4,sp),r0
+	;
+	bt	dbg_chn_msz_0a
+	mov	r1,r0
+	cmp/eq	#" ",r0
+	bt	dbg_chn_msz_0b	; not change !
+	cmp/eq	#".",r0
+	bt	dbg_chn_msz_1a
+	cmp/eq	#H'0d,r0
+	bra	dbg_chn_msz_1a
+	nop
+	;
+dbg_chn_msz_0a
+	bsr	dbg_chn_msz_sub	;<ent> @sp+4=size,@sp=addr.,r1:r0=data
+	nop
+	;
+dbg_chn_msz_0b
+	mov.l	@(4,sp),r1	;!!
+	bsr	dbg_chn_msz_dsp	;<ent> r0=address, r1=size(1..8)
+	mov.l	@sp,r0	;!!!
+	;
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	mov.l	@sp,r0	;!!!
+	mov.l	@(4,sp),r1	;!!
+	add	r1,r0
+	bra	dbg_chn_msz_0
+	mov.l	r0,@sp	;!!!
+	;
+dbg_chn_msz_1
+	clrt
+dbg_chn_msz_1a
+	add	#8,sp	;!!!,!!
+dbg_chn_msz_1b
+	lds	@sp+,pr	;!
+	rts
+	nop
+dbg_chn_msz_scn
+	.sdataz	"%x,%1x\r"
+	.align	8
+
+dbg_chn_msz_dsp:	;<ent> r0=address, r1=size(1..8)
+	sts.l	pr,@-sp	;!
+	; address LSB 00 size 4, 8	long
+	; address LSB 10 size 4, 8	word
+	; address LSB -0 size 2, 6	word
+	; address LSB -1 size 1..8	byte
+	tst	#B'01,r0
+	bf	dbg_chn_msz_dsp_2a	; address odd !
+	rotr	r1
+	bt	dbg_chn_msz_dsp_2	; size 1,3,5,7 !
+	rotr	r1
+	bt	dbg_chn_msz_dsp_1	; size 2,6 !
+	;* size 4,8 *
+	tst	#B'10,r0
+	bf	dbg_chn_msz_dsp_1	; word !
+	;* long *
+	rotr	r1
+	bf	dbg_chn_msz_dsp_0	; long 8 !
+	;* long 4 *
+	bra	dbg_chn_msz_dsp_0a
+	mov.l	@r0,r0
+	;* long 8 *
+dbg_chn_msz_dsp_0
+	mov.l	@r0+,r1
+	mov.l	@r0,r0
+	push	r0	;!!
+	mov	r1,r0
+	bsr	dbg_puthn_sub
+	mov	#8,r1
+	;
+	pop	r0	;!!
+dbg_chn_msz_dsp_0a
+	bsr	dbg_puthn_sub
+	mov	#8,r1
+	;
+	bra	dbg_chn_msz_dsp_3
+	sett
+	;* size 2,6 *
+dbg_chn_msz_dsp_1
+	rotl	r1
+	;* word 2,4,6,8 *
+dbg_chn_msz_dsp_1a
+	push	r1	;!!
+	mov.w	@r0+,r1
+	push	r0	;!!!
+	mov	r1,r0
+	bsr	dbg_puthn_sub
+	mov	#4,r1
+	;
+	pop	r0	;!!!
+	pop	r1	;!!
+	dt	r1
+	bf	dbg_chn_msz_dsp_1a
+	bra	dbg_chn_msz_dsp_3
+	nop
+	;* size 1,3,5,7 *
+dbg_chn_msz_dsp_2
+	rotl	r1
+	;* byte 1,2,3,4,5,6,7,8 *
+dbg_chn_msz_dsp_2a
+	push	r1	;!!
+	mov.b	@r0+,r1
+	push	r0	;!!!
+	mov	r1,r0
+	bsr	dbg_puthn_sub
+	mov	#2,r1
+	;
+	pop	r0	;!!!
+	pop	r1	;!!
+	dt	r1
+	bf	dbg_chn_msz_dsp_2a
+dbg_chn_msz_dsp_3
+	lds.l	@sp+,pr
+	rts
+	nop
+
+	.export	dbg_chn_msz_get
+dbg_chn_msz_get:	;<ent> r0=size <ret>r1:r0
+	sts.l	pr,@-sp	;!
+	add	#-8,sp	;!!,!!!
+	bsr	dbg_getvalhen
+	shll	r0	;r0=keta
+	;
+	bt	dbg_chn_msz_get_0
+	mov.l	r1,@sp
+dbg_chn_msz_get_0
+	movt	r1
+	cmp/eq	#0,r0
+	bt	dbg_chn_msz_get_2
+dbg_chn_msz_get_1
+	push	r0
+	bsr	dbg_putc_sub	; back space
+	mov	#H'08,r0
+	;
+	pop	r0
+	dt	r0
+	bf	dbg_chn_msz_get_1
+dbg_chn_msz_get_2
+	shlr	r1
+	pop	r1	;!!!
+	pop	r0	;!!
+	lds.l	@sp+,pr	;!
+	rts
+	nop
+
+dbg_chn_msz_sub:	;<ent> @sp+4=size,@sp=addr.,r1:r0=data <ret> keep sp
+	push	r0	;!
+	push	r1	;!!	;@sp+12=size,@sp+8=addr.,@so+4=low,@sp=high
+	mov.l	@(8,sp),r0
+	tst	#B'01,r0
+	mov	r0,r1		;r1=address
+	mov.l	@(12,sp),r0	;r0=size
+	bf	dbg_chn_msz_sub_2	; address odd !
+	tst	#B'001,r0
+	bf	dbg_chn_msz_sub_2	; size odd !
+	cmp/eq	#2,r0
+	bt	dbg_chn_msz_sub_1c
+	cmp/eq	#4,r0
+	bt	dbg_chn_msz_sub_0
+	cmp/eq	#6,r0
+	bt	dbg_chn_msz_sub_1a
+	;* size 8 *
+	mov	r1,r0
+	tst	#B'10,r0
+	bf	dbg_chn_msz_sub_1
+	;* long 8 *
+	pop	r0	;!!
+	mov.l	r0,@r1
+	add	#4,r1
+	pop	r0	;!
+	rts
+	mov.l	r0,@r1
+	;* size 4 *
+dbg_chn_msz_sub_0
+	mov	r1,r0
+	tst	#B'10,r0
+	bf	dbg_chn_msz_sub_1b
+	;* long 4 *
+	add	#4,sp	;!!
+	pop	r0	;!
+	rts
+	mov.l	r0,@r1
+	;* word 8 *
+dbg_chn_msz_sub_1
+	mov.w	@sp,r0
+	mov.w	r0,@r1
+	add	#2,r1
+	;* word 6 *
+dbg_chn_msz_sub_1a
+	mov.l	@sp,r0
+	mov.w	r0,@r1
+	add	#2,r1
+	;* word 4 *
+dbg_chn_msz_sub_1b
+	mov.w	@(4,sp),r0
+	mov.w	r0,@r1
+	add	#2,r1
+	;* word 2 *
+dbg_chn_msz_sub_1c
+	mov.l	@(4,sp),r0
+	mov.w	r0,@r1
+	rts
+	add	#8,sp	;!!,!
+	;* byte 1..8 *
+dbg_chn_msz_sub_2
+	push	r0	;!!!
+	neg	r0,r0		;1..8 -> -1..-8
+	add	#8+4,r0		;-1..-8 -> 7..0
+	mov.b	@(r0,sp),r0
+	mov.b	r0,@r1
+	pop	r0	;!!!
+	add	#1,r1
+	dt	r0
+	bf	dbg_chn_msz_sub_2
+	rts
+	add	#8,sp	;!!,!
+
+;- get value hex echo n (without echo H'0d) -
+; entry	 r0=keta(1..16)
+;	 @sp,@sp+4=return value space
+; return T=1:ok(r0=echo keta),0:ng(r1=last character,r0=echo keta)
+;	 @sp=high data,@sp+4=low data
+dbg_getvalhen:
+	sub	r1,r1
+	mov.l	r1,@sp
+	mov.l	r1,@(4,sp)
+	sts.l	pr,@-sp	;!	;@sp+8=low,@sp+4=high,@sp=ret
+dbg_getvalhen_0
+	add	#1,r1
+	push	r1	;!!
+	bsr	dbg_getval
+	push	r0	;!!!
+	;
+	bsr	dbg_hex_to_bin_sub
+	push	r0	;!!!!	;@sp+20=low,@sp+16=high,@sp+12=ret
+	;
+	bt	dbg_getvalhen_1
+	pop	r0	;!!!!
+	cmp/eq	#H'0d,r0
+	mov	r0,r1
+	add	#4,sp	;!!!
+	pop	r0	;!!
+	bf	dbg_getvalhen_2	; error !
+	add	#-1,r0
+	mov	#1,r1
+	cmp/hs	r1,r0
+	bra	dbg_getvalhen_2	; error !
+	mov	#H'0d,r1
+	;
+dbg_getvalhen_1
+	add	#4,sp	;!!!!	;@sp+16=low,@sp+12=high,@sp+8=ret
+	mov.l	@(16,sp),r1
+	shll2	r1
+	shll2	r1
+	or	r0,r1
+	mov	#16,r0
+	mov.b	@(r0,sp),r0
+	mov.l	r1,@(16,sp)
+	shlr2	r0
+	shlr2	r0
+	and	#H'f,r0
+	mov.l	@(12,sp),r1
+	shll2	r1
+	shll2	r1
+	or	r0,r1
+	mov.l	r1,@(12,sp)
+	pop	r0	;!!!
+	pop	r1	;!!
+	cmp/eq	r1,r0
+	bf	dbg_getvalhen_0
+	mov	r1,r0
+dbg_getvalhen_2
+	lds	@sp+,pr	;!
+	rts
+	nop
+
+;- get value with echo (without echo H'0d) -
+; entry	 none.
+; return r0=data
+; break	 r0
+dbg_getval:
+	sts.l	pr,@-sp	;!
+	bsr	dbg_getc_sub
+	nop
+	;
+	cmp/eq	#H'0d,r0
+	bt	dbg_getval_0
+	bsr	dbg_putc_sub
+	nop
+	;
+dbg_getval_0
+	lds.l	@sp+,pr	;!
+	rts
+	nop
+
+	.end
+

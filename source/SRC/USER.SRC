@@ -1,0 +1,58 @@
+;
+;	Program	USER.SRC
+;	Date	2001/2/18 .. 2001/2/18
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/3/7	dot blink write modify
+; 2001/8/13	add trapa #255(=dbg_mode_in) test
+; 2001/9/22	dot blink write modify
+; 2002/7/16	add trapa #254(=function call at MD=1,BL=1) test
+;
+
+	.section	U, CODE, ALIGN=8
+
+	.import	dbg_usr_getc, dbg_usr_putc
+	.export	user
+user:	mov.l	#200000000/4/3,r0
+user_0	dt	r0
+	bf	user_0
+	mov.l	#H'b4000000,r1
+	bsr	user_2
+	mov	#B'00001111,r0
+	;
+	mov.l	#200000000/4/3,r0
+user_1	dt	r0
+	bf	user_1
+;	trapa	#255	; jsr @dbg_mode_in
+	mov	#".",r0
+	mov.l	#dbg_usr_putc,r1
+	trapa	#254
+?1	mov.l	#dbg_usr_getc,r1
+	trapa	#254
+	bf	?2
+	add	#1,r0
+	mov.l	#dbg_usr_putc,r1
+	trapa	#254
+	bra	?1
+	nop
+	;
+?2	mov.l	#H'b4000000,r1
+	bsr	user_2
+	mov	#B'00011111,r0
+	;
+	bra	user
+	nop
+user_2
+	trapa	#1	; mov.b	r0,@r1
+	rts
+	nop
+
+	;/// stack ///
+	.section	S, DATA, ALIGN=8
+stack:
+	.res.b	H'10000
+stack_top
+
+	.end
+

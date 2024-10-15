@@ -1,0 +1,290 @@
+;
+;	Program	__LOADSF.SRC
+;	Date	2001/2/26 .. 2001/3/1
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/3/13	add end message
+; 2001/3/15	download indicator "." -> load address
+; 2001/3/28	add import function
+; 2001/9/22	modify jump -> branch, filename
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;############################
+	;### import function call ###
+	;############################
+
+	.import	dbg_putc, dbg_scanf, dbg_getc, dbg_gethn
+	.import	dbg_puts, dbg_puthn
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_getc_sub
+	branch	dbg_getc
+
+dbg_gethn_sub
+	branch	dbg_gethn
+
+dbg_puts_sub
+	branch	dbg_puts
+
+dbg_puthn_sub
+	branch	dbg_puthn
+
+	;/////////////////////
+	;/// load s format ///
+	;/////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	; S0... start ?
+	; S1... data (address 2byte)
+	; S2... data (address 3byte)
+	; S3... data (address 4byte)
+	; S7... end (address 4byte ?)
+	; S8... end (address 3byte ?)
+	; S9... end (address 2byte ?)
+
+	.export	dbg_lod_sfo
+dbg_lod_sfo:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_lod_sfo_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_lod_sfo_3	; error !
+	bsr	dbg_getc_sub
+	push	r0	;!
+	;
+	cmp/eq	#"S",r0
+	bt	dbg_lod_sfo_1	; ok !
+	bsr	dbg_putc_sub
+	nop
+	;
+	bra	dbg_lod_sfo_2
+	nop
+	;
+	;* recive *
+dbg_lod_sfo_0
+	bsr	dbg_getc_sub
+	nop
+	;
+	add	#-" ",r0
+	cmp/pl	r0
+	bf	dbg_lod_sfo_0	; control code !
+	cmp/eq	#"S"-" ",r0
+	bf	dbg_lod_sfo_2	; format error !
+	;* S *
+dbg_lod_sfo_1
+	bsr	dbg_getc_sub
+	nop
+	;
+	cmp/eq	#"0",r0
+	bt	dbg_lod_sfo_S0
+	cmp/eq	#"1",r0
+	bt	dbg_lod_sfo_S1
+	cmp/eq	#"2",r0
+	bt	dbg_lod_sfo_S2
+	cmp/eq	#"3",r0
+	bt	dbg_lod_sfo_S3
+	cmp/eq	#"7",r0
+	bt	dbg_lod_sfo_S7
+	cmp/eq	#"8",r0
+	bt	dbg_lod_sfo_S8
+	cmp/eq	#"9",r0
+	bt	dbg_lod_sfo_S9
+	bra	dbg_lod_sfo_2	; format error !
+	nop
+	;
+	;* S0... *
+dbg_lod_sfo_S0
+	bsr	dbg_lod_sfo_dmy
+	nop
+	;
+	bf	dbg_lod_sfo_2	; error !
+	exts.b	r0,r0
+	cmp/eq	#-1,r0
+	bf	dbg_lod_sfo_2	; error !
+	bra	dbg_lod_sfo_0
+	nop
+	;
+	;* S1... *
+dbg_lod_sfo_S1
+	;* S2... *
+dbg_lod_sfo_S2
+	;* S3... *
+dbg_lod_sfo_S3
+	add	#-"0"+1,r0	; "1" -> 2, "2" -> 3, "3" -> 4
+	bsr	dbg_lod_sfo_dwr
+	nop
+	;
+	bf	dbg_lod_sfo_2	; error !
+	exts.b	r0,r0
+	cmp/eq	#-1,r0
+	bf	dbg_lod_sfo_2	; check sum error !
+ .aif 1 EQ 0
+	bsr	dbg_putc_sub
+	mov	#".",r0		; for download indicator
+	;
+ .aendi
+	bra	dbg_lod_sfo_0
+	nop
+	;
+	;* S7... *
+dbg_lod_sfo_S7
+	;* S8... *
+dbg_lod_sfo_S8
+	;* S9... *
+dbg_lod_sfo_S9
+	bsr	dbg_lod_sfo_dmy
+	nop
+	;
+	bf	dbg_lod_sfo_2	; error !
+	exts.b	r0,r0
+	cmp/eq	#-1,r0
+	bf	dbg_lod_sfo_2	; check sum error !
+	mov.l	#dbg_lod_sfo_end,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	sett
+dbg_lod_sfo_2
+	add	#4,sp	;!
+dbg_lod_sfo_3
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_lod_sfo_scn
+	.sdataz	"%x\r"
+dbg_lod_sfo_end
+	.sdataz	<H'0d><H'0a>"complete"
+	.align	8
+
+;- load s format dummy with check sum -
+; entry	 none.
+; return T=1:ok(r0=sum),0:error
+; break	 r0,r1
+dbg_lod_sfo_dmy:
+	sts.l	pr,@-sp
+	bsr	dbg_gethn_sub
+	mov	#2,r0
+	;
+	bf	dbg_lod_sfo_dmy_1	; error !
+	mov	r0,r1	; r0=count, r1=sum
+dbg_lod_sfo_dmy_0
+	push	r0	;!
+	push	r1	;!!
+	bsr	dbg_gethn_sub
+	mov	#2,r0
+	;
+	pop	r1	;!!
+	add	r0,r1
+	pop	r0	;!
+	bf	dbg_lod_sfo_dmy_1	; error !
+	dt	r0
+	bf	dbg_lod_sfo_dmy_0	; next !
+	mov	r1,r0
+dbg_lod_sfo_dmy_1
+	lds.l	@sp+,pr
+	rts
+	nop
+
+;- load s format data write with check sum -
+; entry	 r0=address data count (2or3or4)
+;	 @sp=write address offset
+; return T=1:ok,0:error
+; break	 r0,r1
+dbg_lod_sfo_dwr:
+	sts.l	pr,@-sp		;!
+	push	r0		;!!
+	;* data length *
+	bsr	dbg_gethn_sub
+	mov	#2,r0
+	;
+	bf	dbg_lod_sfo_dwr_2	; error !
+	mov.l	@sp,r1		;!!	; r1=address data count
+	cmp/hi	r1,r0
+	bf	dbg_lod_sfo_dwr_2	; error !
+	push	r0		;!!!	; sun
+	sub	r1,r0
+	mov.l	r0,@(4,sp)	;!!	; count
+	;* address *
+	mov	r1,r0
+	bsr	dbg_gethn_sub
+	shll	r0			; 2,3,4 -> 4,6,8
+	;
+	mov	r0,r1
+	pop	r0		;!!!
+	bf	dbg_lod_sfo_dwr_2	; error !
+	;* sum *
+	push	r1		;!!!
+	add	r1,r0
+	shlr8	r1
+	add	r1,r0
+	shlr8	r1
+	add	r1,r0
+	shlr8	r1
+	add	r1,r0
+	pop	r1		;!!!
+	push	r0		;!!!
+	mov.l	@(4+4+4,sp),r0
+	add	r0,r1			; r1=address with offset
+	push	r1		;!!!!
+ .aif 1 EQ 1
+	bsr	dbg_putc_sub	; CR
+	mov.b	#H'0d,r0	;
+	;
+	mov.l	r1,r0
+	bsr	dbg_puthn_sub	; address
+	mov	#8,r1
+	;
+ .aendi
+	;* data [@sp=address,@(4,sp)=sum,@(4+4,sp)=count] *
+dbg_lod_sfo_dwr_0
+	bsr	dbg_gethn_sub
+	mov	#2,r0
+	;
+	bf	dbg_lod_sfo_dwr_1	; error !
+	;* store *
+	mov.l	@sp,r1		;!!!!
+	mov.b	r0,@r1
+	mov.b	@r1,r1
+	exts.b	r0,r0
+	cmp/eq	r1,r0
+	bf	dbg_lod_sfo_dwr_1	; error !
+	;* sum *
+	mov.l	@(4,sp),r1	;!!!
+	add	r0,r1
+	mov.l	r1,@(4,sp)	;!!!
+	;* address *
+	mov.l	@sp,r1		;!!!!
+	add	#1,r1
+	mov.l	r1,@sp		;!!!!
+	;* count *
+	mov.l	@(4+4,sp),r0	;!!
+	dt	r0
+	mov.l	r0,@(4+4,sp)	;!!
+	bf	dbg_lod_sfo_dwr_0	; next !
+dbg_lod_sfo_dwr_1
+	add	#4,sp		;!!!!
+	pop	r0		;!!!
+dbg_lod_sfo_dwr_2
+	add	#4,sp		;!!
+	lds.l	@sp+,pr		;!
+	rts
+	nop
+
+	.end
+

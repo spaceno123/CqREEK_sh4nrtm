@@ -1,0 +1,123 @@
+;
+;	Program	__CHNMEM.SRC
+;	Date	2001/9/22 .. 2001/9/22
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf, dbg_puthn, dbg_gethen
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_puthn_sub
+	branch	dbg_puthn
+
+dbg_gethen_sub
+	branch	dbg_gethen
+
+	;/////////////////////
+	;/// change memory ///
+	;/////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_chn_mem
+dbg_chn_mem:
+	sts.l	pr,@-sp	;!
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_chn_mem_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_chn_mem_1a	; error !
+	push	r0	;!!	; address !
+dbg_chn_mem_0
+	mov.l	@sp,r0	;!!
+	bsr	dbg_puthn_sub
+	mov	#8,r1
+	;
+	bsr	dbg_putc_sub	; space
+	mov	#" ",r0
+	;
+	mov.l	@sp,r0	;!!
+	mov.b	@r0,r0
+	bsr	dbg_puthn_sub
+	mov	#2,r1
+	;
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	bsr	dbg_gethen_sub
+	mov	#1,r0
+	;
+	bt	dbg_chn_mem_0a
+	mov	r1,r0
+	cmp/eq	#" ",r0
+	bt	dbg_chn_mem_0b	; not change !
+	cmp/eq	#".",r0
+	bt	dbg_chn_mem_1
+	cmp/eq	#H'0d,r0
+	bra	dbg_chn_mem_1
+	nop
+	;
+dbg_chn_mem_0a
+	push	r0	;!!!
+	bsr	dbg_gethen_sub
+	mov	#1,r0
+	;
+	pop	r1	;!!!
+	bf	dbg_chn_mem_1
+	shll2	r1
+	shll2	r1
+	or	r1,r0
+	mov.l	@sp,r1	;!!
+	mov.b	r0,@r1
+	bsr	dbg_putc_sub	; back space
+	mov	#H'08,r0	;
+	;
+dbg_chn_mem_0b
+	bsr	dbg_putc_sub	; back space
+	mov	#H'08,r0	;
+	;
+	mov.l	@sp,r1	;!!
+	mov.b	@r1+,r0
+	mov.l	r1,@sp	;!!
+	bsr	dbg_puthn_sub
+	mov	#2,r1
+	;
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	bra	dbg_chn_mem_0
+	nop
+	;
+dbg_chn_mem_1
+	add	#4,sp	;!!
+dbg_chn_mem_1a
+	lds	@sp+,pr	;!
+	rts
+	nop
+dbg_chn_mem_scn
+	.sdataz	"%x\r"
+
+	.end
+

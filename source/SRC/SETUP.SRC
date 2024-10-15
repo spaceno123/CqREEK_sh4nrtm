@@ -1,0 +1,698 @@
+;
+;	Program	SETUP.SRC
+;	Date	2000/12/6 .. 2001/1/7
+;	Copyright (C) 2000-2002 by AKIYA
+;
+;--- up date ---
+; 2001/1/13	modify vct_tbl and tra_tbl
+; 2001/2/18	modify section name
+; 2001/2/25	sdram setup check for standalone
+; 2001/2/26	bus timing tuning
+; 2001/3/7	modify trapa function (#0,#1)
+; 2001/8/13	modify trapa function (#255:dbg_mode_in)
+; 2002/2/17	change bri entry
+; 2002/6/1	flash -> ram copy and run
+; 2002/7/16	add trapa function (#254:function call)
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;/// reset ///
+
+	.section	P1, CODE, ALIGN=8
+	.org	0
+	.export	vbr_adr
+vbr_adr:
+	;* PC=H'a0000000 *
+	mov.l	#EXPEVT,r1
+	mov.l	@r1,r0
+	cmp/eq	#0,r0
+	bf	vbr_adr_0
+	bra	setup
+	nop
+vbr_adr_0
+	shlr2	r0
+	shlr	r0
+;*	mov.l	#vct_trp-P1_OFS+P2_OFS,r1
+	mov.l	#vct_tbl-vbr_adr+P2_OFS,r1			;* 2002/6/1 ..
+	add	r1,r0
+	stc	vbr,r1						;.. * 2002/6/1
+	mov.l	@(r0,r1),r1
+	jmp	@r1
+	nop
+
+	;/// exception ///
+
+	.section	P1, CODE, ALIGN=8
+	.org	H'100
+vof_100:
+	mov.l	#EXPEVT,r1
+	mov.l	@r1,r0
+	shlr2	r0
+	shlr	r0
+;*	mov.l	#vct_trp,r1
+	mov.l	#vct_tbl-vbr_adr,r1				;* 2002/6/1 ..
+	add	r1,r0
+	stc	vbr,r1						;.. * 2002/6/1
+	mov.l	@(r0,r1),r1
+	jmp	@r1
+	nop
+
+	;/// tlb miss exception ///
+
+	.section	P1, CODE, ALIGN=8
+	.org	H'400
+vof_400:
+	mov.l	#EXPEVT,r1
+	mov.l	@r1,r0
+	shlr2	r0
+	shlr	r0
+;*	mov.l	#vct_trp,r1
+	mov.l	#vct_tbl-vbr_adr,r1				;* 2002/6/1 ..
+	add	r1,r0
+	stc	vbr,r1						;.. * 2002/6/1
+	mov.l	@(r0,r1),r1
+	jmp	@r1
+	nop
+
+	;/// interrupt ///
+
+	.section	P1, CODE, ALIGN=8
+	.org	H'600
+vof_600:
+	mov.l	#INTEVT,r1
+	mov.l	@r1,r0
+	shlr2	r0
+	shlr	r0
+;*	mov.l	#vct_trp,r1
+	mov.l	#vct_tbl-vbr_adr,r1				;* 2002/6/1 ..
+	add	r1,r0
+	stc	vbr,r1						;.. * 2002/6/1
+	mov.l	@(r0,r1),r1
+	jmp	@r1
+	nop
+
+	;/// trap ///
+
+	.section	P1, CODE, ALIGN=8
+
+tra_fnc:
+	mov.l	#TRA,r1
+	mov.l	@r1,r0
+;*	mov.l	#vct_trp+tra_tbl-vct_tbl,r1
+	mov.l	#tra_tbl-vbr_adr,r1				;* 2002/6/1 ..
+	add	r1,r0
+	stc	vbr,r1						;.. * 2002/6/1
+	mov.l	@(r0,r1),r1
+	jmp	@r1
+	nop
+
+	;/// dummy (vector) ///
+
+	.section	P1, CODE, ALIGN=8
+
+vct_non
+	mov.l	#vct_tbl-vbr_adr,r1				;+ 2002/6/1
+	sub	r1,r0						;+ 2002/6/1
+	shll2	r0
+	shll	r0
+	bra	$
+	nop
+
+	;/// dummy (trap) ///
+
+	.section	P1, CODE, ALIGN=8
+
+tra_non
+	mov.l	#tra_tbl-vbr_adr,r1				;+ 2002/6/1
+	sub	r1,r0						;+ 2002/6/1
+	mov	r0,r1
+	shlr2	r1
+	bra	$
+	nop
+
+	;/// setup ///
+
+	.import	dbg_ini, user
+
+	.section	P1, CODE, ALIGN=8
+setup:
+
+	mov.l	#WTCSR,r1
+	mov.w	#H'a500,r0
+	mov.w	r0,@r1
+
+	mov.l	#BCR1,r1	; EM0   IO  14QSX HZ 0BE 5BE 6BE DMT B
+	mov.l	#H'0000000c,r0	; 000---00--00000-00 000 000 000 011-0
+	mov.l	r0,@r1
+
+	mov.l	#BCR2,r1	; A0SZ A6SZ A5SZ A4SZ A3SZ A2SZ A1SZ  P
+	mov.w	#H'b538,r0	;  10   11   01   01   00   11   10  -0
+	mov.w	r0,@r1
+
+	mov.l	#WCR1,r1	;  DMA 6IW 5IW 4IW 3IW 2IW 1IW 0IW
+	mov.l	#H'00010111,r0	; -000-000-000-001-000-001-001-001
+	mov.l	r0,@r1
+
+	mov.l	#WCR2,r1	; A6W A6B A5W A5B A4W A3W A2W A1W A0W A0B
+	mov.l	#H'108a2520,r0	; 000 100 001 000 101-001-010 100 100 000
+	mov.l	r0,@r1
+
+	mov.l	#WCR3,r1	;      SH6 SH5 SH4 SH3 SH2 SH1 SH0
+	mov.l	#H'00110111,r0	; -----000-001-001-000-001-001-001
+	mov.l	r0,@r1
+
+	mov.l	#RTCOR,r1
+	mov.w	#H'a500|H'41,r0	;(64msec/4096=15.625usec) > CKIO/16*65
+	mov.w	r0,@r1
+
+	mova	@(0,pc),r0	;H'abcdefgh
+	swap.w	r0,r0		;H'efghabcd
+	swap.b	r0,r0		;H'efghcdab
+	and	#H'1f,r0
+	add	#-4,r0		;H'00,H'04,H'08,H'0c,H'10,H'14,H'18,H'1c
+	cmp/pz	r0
+	bt	setup_0a	; not flash area !
+
+	mov.l	#MCR,r1
+	mov.l	#H'10192194,r0	; 0 0 010---0-011-01 001 000 0 11 0 010 1 0 0
+	mov.l	r0,@r1
+
+	mov.l	#H'ff90008c,r1
+	mov	#H'aa,r0
+	mov.b	r0,@r1
+
+	mov.l	#RTCSR,r1	; F E CKS V E L
+	mov.w	#H'a500|H'10,r0	; 0 0 010 0 0 0
+	mov.w	r0,@r1
+
+	mov.l	#RFCR,r1
+	mov.w	#H'a400|0,r0
+	mov.w	r0,@r1
+setup_0
+	mov.w	@r1,r0
+	add	#-8,r0
+	cmp/pz	r0
+	bf	setup_0
+
+	mov.l	#MCR,r1
+	mov.l	#H'50192194,r0	; 0 1 010---0-011-01 001 000 0 11 0 010 1 0 0
+	mov.l	r0,@r1
+
+	mov.l	#H'ff90008c,r1
+	mov	#H'aa,r0
+	mov.b	r0,@r1
+								;+ 2002/6/1 ..
+	mov.l	#H'a0000000,r1			; flash top
+	mov.l	#H'a8000000,r2			; ram top
+	mov.l	#(code_end-vbr_adr+3)/4,r3	; (copy size)/4
+setup_0x
+	mov.l	@r1+,r0
+	mov.l	r0,@r2
+	add	#4,r2
+	dt	r3
+	bf	setup_0x
+								;.. + 2002/6/1
+setup_0a
+
+	mov.l	#stack_top,sp
+
+	mov.l	#vbr_adr,r0
+	ldc	r0,vbr
+
+ .aif 1 EQ 0							;- 2002/6/1 ..
+	mov.l	#vct_trp_top,r1
+	mov.l	#vct_trp,r2
+	mov.l	#vct_trp_end-vct_trp_top,r3
+setup_1
+	mov.b	@r1+,r0
+	mov.b	r0,@r2
+	add	#1,r2
+	dt	r3
+	bf	setup_1
+ .aendi								;.. - 2002/6/1
+
+	mov.l	#setup_2,r0
+	mov	#-1,r1		;r1=H'ffffffff
+	shlr2	r1		;r1=H'3fffffff
+	shlr	r1		;r1=H'1fffffff
+	and	r0,r1		;mask
+	mov	#H'a0,r0	;r0=H'ffffffa0
+	shll8	r0		;r0=H'ffffa000
+	shll16	r0		;r0=H'a0000000
+	or	r1,r0		;p2 area
+	jmp	@r0
+	nop
+setup_2
+	mov.l	#CCR,r1		;  a   b  cd e fghi
+	mov.l	#B'00000000000000000000100100001001,r0
+	mov.l	#H'00000909,r0	;a:IIX instruction index (0:12..5/1:25,11..5)
+	mov.l	r0,@r1		;b:ICI instruction cash inhibit (1:V=0)
+	nop			;c:ICE instruction cash enable (1:enable)
+	nop			;d:OIX operand index (0:13..5/1:25,12..5)
+	nop			;e:ORA operand cash ram (1:ram 8k)
+	nop			;f:OCI operand cash inhibit (1:V=U=0)
+	nop			;g:CB P1 copy back (0:write thru/1:copy back)
+	nop			;h:WT P0 write thru (0:copy back/1:write thru)
+	nop			;i:OCE operand cash enable (1:enable)
+	nop
+
+	mov.l	#setup_3,r0
+	jmp	@r0
+	nop
+
+setup_3
+
+	mov.l	#dbg_ini,r0
+	jsr	@r0
+	nop
+
+	mov.l	#startof S+sizeof S,r15
+	mov.l	#B'10001111111111111111111100001111,r1
+	stc	sr,r0
+	and	r1,r0
+	ldc	r0,ssr
+	mov.l	#user,r0
+	ldc	r0,spc
+	rte
+	nop
+
+tra_mov_b_ar1_r0:
+	mov	#B'11011111,r1
+	swap.b	r1,r1
+	swap.w	r1,r1
+	stc.l	sr,r0
+	and	r1,r0
+	ldc.l	r0,sr
+	mov.b	@r1,r0
+	rte
+	nop
+
+tra_mov_b_r0_ar1:
+	mov	#B'11011111,r1
+	swap.b	r1,r1
+	swap.w	r1,r1
+	stc.l	sr,r0
+	and	r1,r0
+	ldc.l	r0,sr
+	mov.b	r0,@r1
+	rte
+	nop
+
+tra_fnc_ar1:
+	mov	#B'11011111,r1	; for RB=0
+	swap.b	r1,r1		;
+	swap.w	r1,r1		;
+	stc.l	sr,r0		;
+	and	r1,r0		;
+	ldc.l	r0,sr		;
+	jsr	@r1
+	nop
+	;
+	ldc	r0,r0_bank
+	ldc	r1,r1_bank
+	stc	ssr,r0		; for T bit pass
+	mov	#-1,r1		;
+	shad	r1,r0		;
+	rotcl	r0		;
+	ldc	r0,ssr		;
+	stc	r1_bank,r1
+	stc	r0_bank,r0
+	rte
+	nop
+
+	.align	4
+
+	;/// vector table ///
+
+	.import	dbg_sci_err, dbg_sci_rxd, dbg_sci_txd
+
+	.section	P1, CODE, ALIGN=8
+
+;-vct_trp_top							;- 2002/6/1
+
+vct_tbl:
+	.data.l	setup-P1_OFS+P2_OFS	;vct_non	;000
+	.data.l	vct_non	;020
+	.data.l	vct_non	;040
+	.data.l	vct_non	;060
+	.data.l	vct_non	;080
+	.data.l	vct_non	;0a0
+	.data.l	vct_non	;0c0
+	.data.l	vct_non	;0e0
+	.data.l	vct_non	;100
+	.data.l	vct_non	;120
+	.data.l	vct_non	;140
+	.data.l	tra_fnc	;vct_non	;160
+	.data.l	vct_non	;180
+	.data.l	vct_non	;1a0
+	.data.l	vct_non	;1c0
+	.data.l	vct_non	;1e0
+	.data.l	vct_non	;200
+	.data.l	vct_non	;220
+	.data.l	vct_non	;240
+	.data.l	vct_non	;260
+	.data.l	vct_non	;280
+	.data.l	vct_non	;2a0
+	.data.l	vct_non	;2c0
+	.data.l	vct_non	;2e0
+	.data.l	vct_non	;300
+	.data.l	vct_non	;320
+	.data.l	vct_non	;340
+	.data.l	vct_non	;360
+	.data.l	vct_non	;380
+	.data.l	vct_non	;3a0
+	.data.l	vct_non	;3c0
+	.data.l	vct_non	;3e0
+	.data.l	vct_non	;400
+	.data.l	vct_non	;420
+	.data.l	vct_non	;440
+	.data.l	vct_non	;460
+	.data.l	vct_non	;480
+	.data.l	vct_non	;4a0
+	.data.l	vct_non	;4c0
+	.data.l	vct_non	;4e0
+	.data.l	vct_non	;500
+	.data.l	vct_non	;520
+	.data.l	vct_non	;540
+	.data.l	vct_non	;560
+	.data.l	vct_non	;580
+	.data.l	vct_non	;5a0
+	.data.l	vct_non	;5c0
+	.data.l	vct_non	;5e0
+	.data.l	vct_non	;600
+	.data.l	vct_non	;620
+	.data.l	vct_non	;640
+	.data.l	vct_non	;660
+	.data.l	vct_non	;680
+	.data.l	vct_non	;6a0
+	.data.l	vct_non	;6c0
+	.data.l	vct_non	;6e0
+	.data.l	dbg_sci_err	;vct_non	;700
+	.data.l	dbg_sci_rxd	;vct_non	;720
+	.data.l	dbg_sci_err	;vct_non	;740
+	.data.l	dbg_sci_txd	;vct_non	;760
+	.data.l	vct_non	;780
+	.data.l	vct_non	;7a0
+	.data.l	vct_non	;7c0
+	.data.l	vct_non	;7e0
+	.data.l	vct_non	;800
+	.data.l	vct_non	;820
+	.data.l	vct_non	;840
+	.data.l	vct_non	;860
+	.data.l	vct_non	;880
+	.data.l	vct_non	;8a0
+	.data.l	vct_non	;8c0
+	.data.l	vct_non	;8e0
+
+	;/// trap table ///
+
+	.import	dbg_mode_in
+tra_tbl:
+	.data.l	tra_mov_b_ar1_r0	;000(00:  0)
+	.data.l	tra_mov_b_r0_ar1	;004(01:  1)
+	.data.l	tra_non	;008(02:  2)
+	.data.l	tra_non	;00c(03:  3)
+	.data.l	tra_non	;010(04:  4)
+	.data.l	tra_non	;014(05:  5)
+	.data.l	tra_non	;018(06:  6)
+	.data.l	tra_non	;01c(07:  7)
+	.data.l	tra_non	;020(08:  8)
+	.data.l	tra_non	;024(09:  9)
+	.data.l	tra_non	;028(0a: 10)
+	.data.l	tra_non	;02c(0b: 11)
+	.data.l	tra_non	;030(0c: 12)
+	.data.l	tra_non	;034(0d: 13)
+	.data.l	tra_non	;038(0e: 14)
+	.data.l	tra_non	;03c(0f: 15)
+	.data.l	tra_non	;040(10: 16)
+	.data.l	tra_non	;044(11: 17)
+	.data.l	tra_non	;048(12: 18)
+	.data.l	tra_non	;04c(13: 19)
+	.data.l	tra_non	;050(14: 20)
+	.data.l	tra_non	;054(15: 21)
+	.data.l	tra_non	;058(16: 22)
+	.data.l	tra_non	;05c(17: 23)
+	.data.l	tra_non	;060(18: 24)
+	.data.l	tra_non	;064(19: 25)
+	.data.l	tra_non	;068(1a: 26)
+	.data.l	tra_non	;06c(1b: 27)
+	.data.l	tra_non	;070(1c: 28)
+	.data.l	tra_non	;074(1d: 29)
+	.data.l	tra_non	;078(1e: 30)
+	.data.l	tra_non	;07c(1f: 31)
+	.data.l	tra_non	;080(20: 32)
+	.data.l	tra_non	;084(21: 33)
+	.data.l	tra_non	;088(22: 34)
+	.data.l	tra_non	;08c(23: 35)
+	.data.l	tra_non	;090(24: 36)
+	.data.l	tra_non	;094(25: 37)
+	.data.l	tra_non	;098(26: 38)
+	.data.l	tra_non	;09c(27: 39)
+	.data.l	tra_non	;0a0(28: 40)
+	.data.l	tra_non	;0a4(29: 41)
+	.data.l	tra_non	;0a8(2a: 42)
+	.data.l	tra_non	;0ac(2b: 43)
+	.data.l	tra_non	;0b0(2c: 44)
+	.data.l	tra_non	;0b4(2d: 45)
+	.data.l	tra_non	;0b8(2e: 46)
+	.data.l	tra_non	;0bc(2f: 47)
+	.data.l	tra_non	;0c0(30: 48)
+	.data.l	tra_non	;0c4(31: 49)
+	.data.l	tra_non	;0c8(32: 50)
+	.data.l	tra_non	;0cc(33: 51)
+	.data.l	tra_non	;0d0(34: 52)
+	.data.l	tra_non	;0d4(35: 53)
+	.data.l	tra_non	;0d8(36: 54)
+	.data.l	tra_non	;0dc(37: 55)
+	.data.l	tra_non	;0e0(38: 56)
+	.data.l	tra_non	;0e4(39: 57)
+	.data.l	tra_non	;0e8(3a: 58)
+	.data.l	tra_non	;0ec(3b: 59)
+	.data.l	tra_non	;0f0(3c: 60)
+	.data.l	tra_non	;0f4(3d: 61)
+	.data.l	tra_non	;0f8(3e: 62)
+	.data.l	tra_non	;0fc(3f: 63)
+	.data.l	tra_non	;100(40: 64)
+	.data.l	tra_non	;104(41: 65)
+	.data.l	tra_non	;108(42: 66)
+	.data.l	tra_non	;10c(43: 67)
+	.data.l	tra_non	;110(44: 68)
+	.data.l	tra_non	;114(45: 69)
+	.data.l	tra_non	;118(46: 70)
+	.data.l	tra_non	;11c(47: 71)
+	.data.l	tra_non	;120(48: 72)
+	.data.l	tra_non	;124(49: 73)
+	.data.l	tra_non	;128(4a: 74)
+	.data.l	tra_non	;12c(4b: 75)
+	.data.l	tra_non	;130(4c: 76)
+	.data.l	tra_non	;134(4d: 77)
+	.data.l	tra_non	;138(4e: 78)
+	.data.l	tra_non	;13c(4f: 79)
+	.data.l	tra_non	;140(50: 80)
+	.data.l	tra_non	;144(51: 81)
+	.data.l	tra_non	;148(52: 82)
+	.data.l	tra_non	;14c(53: 83)
+	.data.l	tra_non	;150(54: 84)
+	.data.l	tra_non	;154(55: 85)
+	.data.l	tra_non	;158(56: 86)
+	.data.l	tra_non	;15c(57: 87)
+	.data.l	tra_non	;160(58: 88)
+	.data.l	tra_non	;164(59: 89)
+	.data.l	tra_non	;168(5a: 90)
+	.data.l	tra_non	;16c(5b: 91)
+	.data.l	tra_non	;170(5c: 92)
+	.data.l	tra_non	;174(5d: 93)
+	.data.l	tra_non	;178(5e: 94)
+	.data.l	tra_non	;17c(5f: 95)
+	.data.l	tra_non	;180(60: 96)
+	.data.l	tra_non	;184(61: 97)
+	.data.l	tra_non	;188(62: 98)
+	.data.l	tra_non	;18c(63: 99)
+	.data.l	tra_non	;190(64:100)
+	.data.l	tra_non	;194(65:101)
+	.data.l	tra_non	;198(66:102)
+	.data.l	tra_non	;19c(67:103)
+	.data.l	tra_non	;1a0(68:104)
+	.data.l	tra_non	;1a4(69:105)
+	.data.l	tra_non	;1a8(6a:106)
+	.data.l	tra_non	;1ac(6b:107)
+	.data.l	tra_non	;1b0(6c:108)
+	.data.l	tra_non	;1b4(6d:109)
+	.data.l	tra_non	;1b8(6e:110)
+	.data.l	tra_non	;1bc(6f:111)
+	.data.l	tra_non	;1c0(70:112)
+	.data.l	tra_non	;1c4(71:113)
+	.data.l	tra_non	;1c8(72:114)
+	.data.l	tra_non	;1cc(73:115)
+	.data.l	tra_non	;1d0(74:116)
+	.data.l	tra_non	;1d4(75:117)
+	.data.l	tra_non	;1d8(76:118)
+	.data.l	tra_non	;1dc(77:119)
+	.data.l	tra_non	;1e0(78:120)
+	.data.l	tra_non	;1e4(79:121)
+	.data.l	tra_non	;1e8(7a:122)
+	.data.l	tra_non	;1ec(7b:123)
+	.data.l	tra_non	;1f0(7c:124)
+	.data.l	tra_non	;1f4(7d:125)
+	.data.l	tra_non	;1f8(7e:126)
+	.data.l	tra_non	;1fc(7f:127)
+	.data.l	tra_non	;200(80:128)
+	.data.l	tra_non	;204(81:129)
+	.data.l	tra_non	;208(82:130)
+	.data.l	tra_non	;20c(83:131)
+	.data.l	tra_non	;210(84:132)
+	.data.l	tra_non	;214(85:133)
+	.data.l	tra_non	;218(86:134)
+	.data.l	tra_non	;21c(87:135)
+	.data.l	tra_non	;220(88:136)
+	.data.l	tra_non	;224(89:137)
+	.data.l	tra_non	;228(8a:138)
+	.data.l	tra_non	;22c(8b:139)
+	.data.l	tra_non	;230(8c:140)
+	.data.l	tra_non	;234(8d:141)
+	.data.l	tra_non	;238(8e:142)
+	.data.l	tra_non	;23c(8f:143)
+	.data.l	tra_non	;240(90:144)
+	.data.l	tra_non	;244(91:145)
+	.data.l	tra_non	;248(92:146)
+	.data.l	tra_non	;24c(93:147)
+	.data.l	tra_non	;250(94:148)
+	.data.l	tra_non	;254(95:149)
+	.data.l	tra_non	;258(96:150)
+	.data.l	tra_non	;25c(97:151)
+	.data.l	tra_non	;260(98:152)
+	.data.l	tra_non	;264(99:153)
+	.data.l	tra_non	;268(9a:154)
+	.data.l	tra_non	;26c(9b:155)
+	.data.l	tra_non	;270(9c:156)
+	.data.l	tra_non	;274(9d:157)
+	.data.l	tra_non	;278(9e:158)
+	.data.l	tra_non	;27c(9f:159)
+	.data.l	tra_non	;280(a0:160)
+	.data.l	tra_non	;284(a1:161)
+	.data.l	tra_non	;288(a2:162)
+	.data.l	tra_non	;28c(a3:163)
+	.data.l	tra_non	;290(a4:164)
+	.data.l	tra_non	;294(a5:165)
+	.data.l	tra_non	;298(a6:166)
+	.data.l	tra_non	;29c(a7:167)
+	.data.l	tra_non	;2a0(a8:168)
+	.data.l	tra_non	;2a4(a9:169)
+	.data.l	tra_non	;2a8(aa:170)
+	.data.l	tra_non	;2ac(ab:171)
+	.data.l	tra_non	;2b0(ac:172)
+	.data.l	tra_non	;2b4(ad:173)
+	.data.l	tra_non	;2b8(ae:174)
+	.data.l	tra_non	;2bc(af:175)
+	.data.l	tra_non	;2c0(b0:176)
+	.data.l	tra_non	;2c4(b1:177)
+	.data.l	tra_non	;2c8(b2:178)
+	.data.l	tra_non	;2cc(b3:179)
+	.data.l	tra_non	;2d0(b4:180)
+	.data.l	tra_non	;2d4(b5:181)
+	.data.l	tra_non	;2d8(b6:182)
+	.data.l	tra_non	;2dc(b7:183)
+	.data.l	tra_non	;2e0(b8:184)
+	.data.l	tra_non	;2e4(b9:185)
+	.data.l	tra_non	;2e8(ba:186)
+	.data.l	tra_non	;2ec(bb:187)
+	.data.l	tra_non	;2f0(bc:188)
+	.data.l	tra_non	;2f4(bd:189)
+	.data.l	tra_non	;2f8(be:190)
+	.data.l	tra_non	;2fc(bf:191)
+	.data.l	tra_non	;300(c0:192)
+	.data.l	tra_non	;304(c1:193)
+	.data.l	tra_non	;308(c2:194)
+	.data.l	tra_non	;30c(c3:195)
+	.data.l	tra_non	;310(c4:196)
+	.data.l	tra_non	;314(c5:197)
+	.data.l	tra_non	;318(c6:198)
+	.data.l	tra_non	;31c(c7:199)
+	.data.l	tra_non	;320(c8:200)
+	.data.l	tra_non	;324(c9:201)
+	.data.l	tra_non	;328(ca:202)
+	.data.l	tra_non	;32c(cb:203)
+	.data.l	tra_non	;330(cc:204)
+	.data.l	tra_non	;334(cd:205)
+	.data.l	tra_non	;338(ce:206)
+	.data.l	tra_non	;33c(cf:207)
+	.data.l	tra_non	;340(d0:208)
+	.data.l	tra_non	;344(d1:209)
+	.data.l	tra_non	;348(d2:210)
+	.data.l	tra_non	;34c(d3:211)
+	.data.l	tra_non	;350(d4:212)
+	.data.l	tra_non	;354(d5:213)
+	.data.l	tra_non	;358(d6:214)
+	.data.l	tra_non	;35c(d7:215)
+	.data.l	tra_non	;360(d8:216)
+	.data.l	tra_non	;364(d9:217)
+	.data.l	tra_non	;368(da:218)
+	.data.l	tra_non	;36c(db:219)
+	.data.l	tra_non	;370(dc:220)
+	.data.l	tra_non	;374(dd:221)
+	.data.l	tra_non	;378(de:222)
+	.data.l	tra_non	;37c(df:223)
+	.data.l	tra_non	;380(e0:224)
+	.data.l	tra_non	;384(e1:225)
+	.data.l	tra_non	;388(e2:226)
+	.data.l	tra_non	;38c(e3:227)
+	.data.l	tra_non	;390(e4:228)
+	.data.l	tra_non	;394(e5:229)
+	.data.l	tra_non	;398(e6:230)
+	.data.l	tra_non	;39c(e7:231)
+	.data.l	tra_non	;3a0(e8:232)
+	.data.l	tra_non	;3a4(e9:233)
+	.data.l	tra_non	;3a8(ea:234)
+	.data.l	tra_non	;3ac(eb:235)
+	.data.l	tra_non	;3b0(ec:236)
+	.data.l	tra_non	;3b4(ed:237)
+	.data.l	tra_non	;3b8(ee:238)
+	.data.l	tra_non	;3bc(ef:239)
+	.data.l	tra_non	;3c0(f0:240)
+	.data.l	tra_non	;3c4(f1:241)
+	.data.l	tra_non	;3c8(f2:242)
+	.data.l	tra_non	;3cc(f3:243)
+	.data.l	tra_non	;3d0(f4:244)
+	.data.l	tra_non	;3d4(f5:245)
+	.data.l	tra_non	;3d8(f6:246)
+	.data.l	tra_non	;3dc(f7:247)
+	.data.l	tra_non	;3e0(f8:248)
+	.data.l	tra_non	;3e4(f9:249)
+	.data.l	tra_non	;3e8(fa:250)
+	.data.l	tra_non	;3ec(fb:251)
+	.data.l	tra_non	;3f0(fc:252)
+	.data.l	tra_non	;3f4(fd:253)
+	.data.l	tra_fnc_ar1		;3f8(fe:254)
+	.data.l	dbg_mode_in		;3fc(ff:255)
+
+;-vct_trp_end							;- 2002/6/1
+
+ .aif 1 EQ 0							;- 2002/6/1 ..
+	;/// table ///
+
+	.section	B1, DATA, ALIGN=8
+
+vct_trp:
+	.res.b	vct_trp_end-vct_trp_top
+ .aendi								;.. - 2002/6/1
+
+	;/// for code end ///					;+ 2002/6/1 ..
+
+	.section	FE, CODE, ALIGN=8
+
+	.sdata	"V010"
+code_end:							;.. + 2002/6/1
+
+	;/// stack ///
+
+	.section	S, DATA, ALIGN=8	; for user stack reference
+
+	.section	S1, DATA, ALIGN=8
+stack:
+	.res.b	H'1000
+stack_top
+
+	.end
+

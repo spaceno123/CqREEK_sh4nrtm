@@ -1,0 +1,1825 @@
+;
+;	Program	__DBGMOD.SRC
+;	Date	2001/1/6 .. 2001/1/6
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/1/13	section P0 -> DBG_P1
+; 2001/1/30	dump register
+; 2001/2/18	modify section offset
+; 2001/3/28	add import function, modify dump register
+; 2001/5/19	modify dbg_dri(->dbg_dmp_rip), dbg_dmp_reg message
+; 2001/6/26	modify dbg_dis_asm_lin -> dbg_dis_asm_brk
+; 2001/7/9	add dbg_dmp_frg
+; 2001/8/13	add dbg_mode_in_ent
+; 2001/8/15	add dbg_brk_run, dbg_ste_run, dbg_trc_run ...
+; 2001/9/22	modify branch -> branch, filename
+; 2001/9/24	add dbg_chn_reg
+; 2001/11/28	add dbg_vew_lst
+; 2001/12/2	add dbg_vew_trc, change dbg_ste_run_sub -> dbg_trc_run_sub
+; 2001/12/2	modify dbg_ste_run, dbg_ste_one, add dbg_ste_run_sub
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_puts, dbg_puthn, dbg_dis_asm_brk, dbg_getc, dbg_putc
+	.import	dbg_scanf, dbg_is_slp_or_tra, dbg_getche, dbg_chn_msz_get
+;*	.import	dbg_dis_adr, dbg_dsp_opc, dbg_dsp_opr
+	.import	dbg_dis_asm_lin				;*
+	.import	dbg_is_cal_or_dt
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_puts_sub
+	branch	dbg_puts
+
+dbg_puthn_sub
+	branch	dbg_puthn
+
+dbg_dis_asm_brk_sub
+	branch	dbg_dis_asm_brk
+
+dbg_getc_sub
+	branch	dbg_getc
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+dbg_is_slp_or_tra_sub
+	branch	dbg_is_slp_or_tra
+
+dbg_getche_sub
+	branch	dbg_getche
+
+dbg_chn_msz_get_sub
+	branch	dbg_chn_msz_get
+
+ .aif 1 EQ 0
+dbg_dis_adr_sub
+	branch	dbg_dis_adr
+
+dbg_dsp_opc_sub
+	branch	dbg_dsp_opc
+
+dbg_dsp_opr_sub
+	branch	dbg_dsp_opr
+ .aelse
+dbg_dis_asm_lin_sub
+	branch	dbg_dis_asm_lin
+ .aendi
+
+dbg_is_cal_or_dt_sub
+	branch	dbg_is_cal_or_dt
+
+	.import	dbg_slp, dbg_cmd, dbg_sci_lop, dbg_sci_end, dbg_usp
+	.import	dbg_cmd_top, dbg_cmd2_top
+
+	;////////////////////////
+	;/// debuger mode out ///
+	;////////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_stp
+dbg_stp:
+	mov.l	#dbg_slp,r1
+	mov.l	#dbg_sci_end,r0
+	mov.l	r0,@r1
+	mov.l	#dbg_cmd,r1
+	mov.l	#dbg_cmd_top,r0
+	mov.l	r0,@r1
+	sts.l	pr,@-sp
+	mov.l	#dbg_stp_msg,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	lds.l	@sp+,pr
+	rts
+	sett
+
+	;///////////////////////
+	;/// debuger mode in ///
+	;///////////////////////
+
+	.export	dbg_sta
+dbg_sta:
+	mov.l	#dbg_slp,r1
+	mov.l	#dbg_sci_lop,r0
+	mov.l	r0,@r1
+	mov.l	#dbg_cmd,r1
+	mov.l	#dbg_cmd2_top,r0
+	mov.l	r0,@r1
+	sts.l	pr,@-sp	;!
+	mov.l	#dbg_sta_msg,r1
+dbg_sta_0
+	bsr	dbg_puts_sub
+	nop
+	;
+	bra	dbg_dmp_rip
+	lds.l	@sp+,pr	;!
+
+	.import	dbg_entry_msg_crlf
+	.export	dbg_mode_in_ent
+dbg_mode_in_ent:
+	mov.l	#dbg_slp,r1
+	mov.l	#dbg_sci_lop,r0
+	mov.l	r0,@r1
+	mov.l	#dbg_cmd,r1
+	mov.l	#dbg_cmd2_top,r0
+	mov.l	r0,@r1
+	sts.l	pr,@-sp	;!
+	mov.l	#dbg_entry_msg_crlf,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	mov.l	#dbg_sta_msg_crlf,r1
+	bra	dbg_sta_0
+	nop
+
+	;/////////////////////////////////
+	;/// program counter break set ///
+	;/////////////////////////////////
+
+	.import	dbg_brk
+	.export	dbg_pcb_set
+dbg_pcb_set:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_pcb_set_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_pcb_set_z	; error !
+	tst	#1,r0
+	bf	dbg_pcb_set_z	; error ! (must be evn)
+	mov.l	#dbg_brk,r1
+	mov.l	r0,@r1
+	mov.l	#pcb_set_msg,r1
+	bra	dbg_pcb_dsp_0
+	nop
+	;
+dbg_pcb_set_z
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_pcb_set_scn
+	.sdataz	"%x\r"
+	.align	8
+
+	;//////////////////////////////////
+	;/// program counter break disp ///
+	;//////////////////////////////////
+
+	.export	dbg_pcb_dsp
+dbg_pcb_dsp:
+	sts.l	pr,@-sp
+	mov.l	#pcb_dsp_msg,r1
+dbg_pcb_dsp_0
+	bsr	dbg_puts_sub
+	nop
+	;
+	mov.l	#dbg_brk,r0
+	mov.l	@r0,r0
+	bsr	dbg_puthn_sub
+	mov	#8,r1
+	;
+	lds.l	@sp+,pr
+	rts
+	sett
+
+	;///////////////////////////////////
+	;/// program counter break clear ///
+	;///////////////////////////////////
+
+	.export	dbg_pcb_clr
+dbg_pcb_clr:
+	sts.l	pr,@-sp
+	mov	#0,r0
+	mov.l	#dbg_brk,r1
+	mov.l	r0,@r1
+	mov.l	#pcb_clr_msg,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	lds.l	@sp+,pr
+	rts
+	sett
+
+	;//////////////////////
+	;/// run with break ///
+	;//////////////////////
+
+	.import	dbg_dbr_ent
+	.export	dbg_brk_run
+dbg_brk_run:
+	sts.l	pr,@-sp	;!
+	bsr	cmp_pc_pb
+	nop
+	;
+	bf	dbg_brk_run_0	; pc != pb !
+	;* 1 trace run *
+	bsr	dbg_trc_run_sub
+	nop
+	;
+	exts.w	r0,r0
+	cmp/pl	r0
+	bt	dbg_brk_run_1	; user break !
+	bsr	cmp_pc_pb
+	nop
+	;
+	bt	dbg_brk_run_2	; pc break !
+	;* normal *
+dbg_brk_run_0
+	stc	dbr,r0
+	bsr	setup_pc_break
+	push	r0	;!!
+	;
+	mov	#0,r0
+	mov.l	#BBRA,r1
+	mov.w	r0,@r1
+	mov.l	#BRCR,r1
+	mov.w	#B'0000010000000001,r0
+	mov.w	r0,@r1
+	mov.l	#dbg_dbr_ent,r0
+	ldc	r0,dbr
+	mov.l	#dbg_slp,r1
+	mov.l	#dbg_sci_end,r0
+	;* go *
+	bsr	dbg_getc_sub
+	mov.l	r0,@r1
+	;
+	pop	r1	;!!
+	ldc	r1,dbr
+	bsr	disable_break
+	push	r0	;!!
+	;
+	mov.l	#dbg_slp,r1
+	mov.l	#dbg_sci_lop,r0
+	mov.l	r0,@r1
+	pop	r0	;!!
+	exts.w	r0,r0
+	cmp/pl	r0
+	bf	dbg_brk_run_2
+	;* user break *
+dbg_brk_run_1	; from dbg_ste_run
+	mov.l	#break_msg,r1
+	bra	dbg_brk_run_3
+	nop
+	;* pc break *
+dbg_brk_run_2	;(from dbg_ste_run)
+	mov.l	#pc_break_msg,r1
+dbg_brk_run_3
+	bsr	dbg_puts_sub
+	nop
+	;
+	bra	dbg_dmp_rip
+	lds.l	@sp+,pr	;!
+	;
+cmp_pc_pb
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r0
+	add	#4+4,r0		; @(4+4,sp)=pr
+	mov.l	@r0,r0		; r0=pc
+	mov.l	#dbg_brk,r1
+	mov.l	@r1,r1
+	rts
+	cmp/eq	r1,r0
+
+	;/////////////////
+	;/// one trace ///
+	;/////////////////
+
+	.export	dbg_trc_one
+dbg_trc_one:
+	sts.l	pr,@-sp
+	bra	dbg_trc_run_0
+	mov	#1,r1
+
+	;/////////////
+	;/// trace ///
+	;/////////////
+
+	.export	dbg_trc_run
+dbg_trc_run:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_trc_run_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_trc_run_z	; error !
+	mov	r0,r1
+	tst	r1,r1
+	bf	dbg_trc_run_0
+	bra	dbg_trc_run_z	; error !
+	clrt
+	;* r1=trace *
+dbg_trc_run_0
+	bsr	dbg_trc_run_sub
+	push	r1	;!
+	;
+	pop	r1	;!
+	exts.w	r0,r0
+	cmp/pl	r0
+	bt	dbg_brk_run_1	; user break !
+	bsr	cmp_pc_pb
+	push	r1	;!
+	;
+	pop	r1	;!
+	bt	dbg_brk_run_2	; pc break !
+	dt	r1
+	bt	dbg_trc_run_1
+	bsr	dbg_dis_asm_brk_sub
+	push	r1	;!
+	;
+	pop	r1	;!
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	bra	dbg_trc_run_0
+	nop
+	;
+dbg_trc_run_1
+	bra	dbg_dmp_rip_0
+	nop
+	;
+dbg_trc_run_z
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_trc_run_scn
+	.sdataz	"%x\r"
+	.align	8
+
+	;////////////////
+	;/// one step ///
+	;////////////////
+
+	.export	dbg_ste_one
+dbg_ste_one:
+	sts.l	pr,@-sp
+	bra	dbg_ste_run_0
+	mov	#1,r1
+
+	;////////////
+	;/// step ///
+	;////////////
+
+	.export	dbg_ste_run
+dbg_ste_run:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_ste_run_scn,r1
+	bsr	dbg_scanf_sub
+	nop
+	;
+	bf	dbg_ste_run_z	; error !
+	mov	r0,r1
+	tst	r1,r1
+	bf	dbg_ste_run_0
+	bra	dbg_ste_run_z	; error !
+	clrt
+	;* r1=step *
+dbg_ste_run_0
+	bsr	dbg_trc_run_sub	;(not step !)
+	push	r1	;!
+	;
+	pop	r1	;!
+	exts.w	r0,r0
+	cmp/pl	r0
+	bt	dbg_brk_run_1	; user break !
+	bsr	cmp_pc_pb
+	push	r1	;!
+	;
+	pop	r1	;!
+	bt	dbg_brk_run_2	; pc break !
+	dt	r1
+	bt	dbg_ste_run_1
+	bsr	dbg_dmp_rip
+	push	r1	;!
+	;
+	pop	r1	;!
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	bra	dbg_ste_run_0
+	nop
+	;
+dbg_ste_run_1
+	bra	dbg_dmp_rip
+	lds.l	@sp+,pr	;!
+	;
+dbg_ste_run_z
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_ste_run_scn
+	.sdataz	"%x\r"
+	.align	8
+
+dbg_trc_run_sub
+	sts.l	pr,@-sp	;!
+	stc	dbr,r0
+	bsr	setup_pc_break
+	push	r0	;!!
+	;
+	bsr	setup_trace_break
+	nop
+	;
+dbg_trc_run_sub_0
+	mov.l	#dbg_dbr_ent,r0
+	ldc	r0,dbr
+	mov.l	#dbg_slp,r1
+	mov.l	#dbg_sci_end,r0
+	;* go *
+	bsr	dbg_getc_sub
+	mov.l	r0,@r1
+	;
+	pop	r1	;!!
+	ldc	r1,dbr
+	bsr	disable_break
+	push	r0	;!!
+	;
+	mov.l	#dbg_slp,r1
+	mov.l	#dbg_sci_lop,r0
+	mov.l	r0,@r1
+	pop	r0	;!!
+	lds.l	@sp+,pr	;!
+	rts
+	nop
+
+setup_pc_break:
+	mov.l	#dbg_brk,r0
+	mov.l	@r0,r0
+	tst	r0,r0
+	bt	setup_pc_break_0	; not set !
+	mov.l	#dbg_usp,r1
+	mov.l	@r1,r1		; @sp=r1
+	add	#4+4,r1		; @(4+4,sp)=pr
+	mov.l	@r1,r1		; r1=pc
+	cmp/eq	r1,r0
+	bt	setup_pc_break_0	; pc == pb then run !
+	mov.l	#BARB,r1
+	mov.l	r0,@r1
+	mov	#B'00000100,r0	; ASID un-used
+	mov.l	#BAMRB,r1
+	mov.b	r0,@r1
+	mov.w	#B'0000000000010100,r0
+setup_pc_break_0
+	mov.l	#BBRB,r1
+	rts
+	mov.w	r0,@r1
+
+setup_trace_break:	;with BRCR set
+	sts.l	pr,@-sp
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r0
+	add	#4+4,r0		; @(4+4,sp)=pr
+	mov.l	@r0,r0		; r0=pc
+	bsr	dbg_is_slp_or_tra_sub
+	push	r0	;!
+	;
+setup_trace_break_0
+	pop	r0	;!
+	lds.l	@sp+,pr
+	bt	setup_trace_break_1
+	;* post break A *
+	mov.l	#BARA,r1
+	mov.l	r0,@r1
+	mov.l	#BAMRA,r1
+	mov	#B'00000100,r0	; ASID un-used
+	mov.b	r0,@r1
+	mov.l	#BBRA,r1
+	mov.w	#B'0000000000010100,r0
+	mov.w	r0,@r1
+	;* A&B *
+	mov.l	#BRCR,r1
+	mov.w	#B'0000010000000001,r0
+	rts
+	mov.w	r0,@r1
+	;* pre break A *
+setup_trace_break_1
+	add	#2,r0		;+2 for pre break
+	mov.l	#BARA,r1
+	mov.l	r0,@r1
+	mov.l	#BAMRA,r1
+	mov	#B'00000100,r0	; ASID un-used
+	mov.b	r0,@r1
+	mov.l	#BBRA,r1
+	mov.w	#B'0000000000010100,r0
+	mov.w	r0,@r1
+	;* A&B *
+	mov.l	#BRCR,r1
+	mov.w	#B'0000000000000001,r0
+	rts
+	mov.w	r0,@r1
+
+disable_break:
+	;* A&B *
+	mov.l	#BRCR,r1
+	mov.w	@r1,r0
+	xor	#1,r0	; clear bit 0
+	mov.w	r0,@r1
+	;* A *
+	mov.w	#B'0000000000000000,r0
+	mov.l	#BBRA,r1
+	mov.w	r0,@r1
+	;* B *
+	mov.l	#BBRB,r1
+	rts
+	mov.w	r0,@r1
+
+dbg_ste_run_sub
+	sts.l	pr,@-sp	;!
+	stc	dbr,r0
+	bsr	setup_pc_break
+	push	r0	;!!
+	;
+	bsr	setup_step_break
+	nop
+	;
+	bra	dbg_trc_run_sub_0
+	nop
+
+setup_step_break:	;with BRCR set
+	sts.l	pr,@-sp
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r0
+	add	#4+4,r0		; @(4+4,sp)=pr
+	mov.l	@r0,r0		; r0=pc
+	bsr	dbg_is_slp_or_tra_sub
+	push	r0	;!
+	;
+	bt	setup_trace_break_0	; sleep or trapa !
+	bsr	dbg_is_cal_or_dt_sub
+	mov.l	@sp,r0	;!	; r0=pc
+	;
+	bf	setup_trace_break_0	; post break !
+	pop	r0	;!
+	lds.l	@sp+,pr
+	bra	setup_trace_break_1	; next pre break !
+	add	#2,r0		;+2 for delay slot
+
+	;/////////////////
+	;/// view list ///
+	;/////////////////
+	;  _____________
+	; |             
+	; | list 17 line - current line 8
+	; |
+	; |============= < space
+	; | regs 5 line 
+	; |_____________ < command line
+	; total 24 line
+
+	.export	dbg_vew_lst
+dbg_vew_lst:
+	sts.l	pr,@-sp
+	;* CR,LF *
+	mov.l	#vew_lst_crlf,r1
+	bsr	dbg_puts_sub
+	nop
+	;* list *
+dbg_vew_lst_0
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r0
+	add	#4+4,r0		; @(4+4,sp)=pr
+	mov.l	@r0,r0		; r0=pc
+	mov	#7,r1
+	sub	r1,r0		; r0-(r1=7)*2
+	bsr	vew_lst_dsp_sp	;
+	sub	r1,r0		;
+	;
+	bsr	vew_lst_dsp_cl
+	mov	#1,r1
+	;
+	bsr	vew_lst_dsp_sp
+	mov	#9,r1
+	;* CLL,CR,LF *
+	mov.l	#vew_lst_cll_crlf,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	bra	dbg_dmp_reg_0
+	nop
+vew_lst_cll_crlf
+	.sdata	<H'1b>"[K"
+vew_lst_crlf
+	.sdataz	<H'0d><H'0a>
+	.align	8
+
+vew_lst_dsp_cl;	;<ent> r0=address, r1=count
+	sts.l	pr,@-sp
+	push	r1		;!
+	push	r1		;!!
+	bra	vew_lst_dsp_sp_0
+	mov	#">",r1
+
+vew_lst_dsp_sp:	;<ent> r0=address, r1=count
+	sts.l	pr,@-sp
+	push	r1		;!
+	push	r1		;!!
+	mov	#" ",r1
+vew_lst_dsp_sp_0
+	mov.l	r1,@(4,sp)	;!
+	mov.l	@sp,r1		;!!
+vew_lst_dsp_sp_1
+	mov.l	r1,@sp		;!!
+	push	r0		;!!!
+	bsr	dbg_putc_sub
+	mov.l	@(4+4,sp),r0	;!
+	;
+ .aif 1 EQ 0
+	mov.l	@sp,r0		;!!!
+	bsr	dbg_puthn_sub
+	mov	#8,r1
+	;
+	mov.l	#vew_lst_dsp_sp8,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	bsr	dbg_dis_adr_sub
+	mov.l	@sp,r0		;!!!
+	;
+	push	r0		;!!!!
+	bsr	dbg_dsp_opc_sub
+	nop
+	;
+	mov.l	@(4,sp),r1	;!!!
+	bsr	dbg_dsp_opr_sub
+	pop	r0		;!!!!
+	;
+ .aelse
+	mov.l	@sp,r0		;!!!
+	bsr	dbg_dis_asm_lin_sub
+	mov	#1,r1
+ .aendi
+	mov.l	#vew_lst_cll_crlf,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	pop	r0		;!!!
+	add	#2,r0
+	mov.l	@sp,r1		;!!
+	dt	r1
+	bf	vew_lst_dsp_sp_1
+	add	#8,sp		;!!,!
+	lds.l	@sp+,pr
+	rts
+	nop
+vew_lst_dsp_sp8
+	.sdataz	"        "
+	.align	8
+
+	;//////////////////
+	;/// view trace ///
+	;//////////////////
+
+	.export	dbg_vew_trc
+dbg_vew_trc:
+	sts.l	pr,@-sp
+	mov.l	#dbg_vew_trc_msg,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	bsr	dbg_trc_run_sub
+	nop
+	;
+dbg_vew_trc_0
+	exts.w	r0,r0
+	cmp/pl	r0
+	bf	dbg_vew_trc_1
+	bra	dbg_brk_run_1	; user break !
+	nop
+	;
+dbg_vew_trc_1
+	bsr	cmp_pc_pb
+	nop
+	;
+	bf	dbg_vew_rtc_2
+	bra	dbg_brk_run_2	; pc break !
+	nop
+	;
+dbg_vew_rtc_2
+	mov.l	#dbg_vew_trc_ms2,r1
+	bsr	dbg_puts_sub
+	nop
+	bra	dbg_vew_lst_0
+	nop
+dbg_vew_trc_msg
+	.sdataz	<H'0d><H'1b>"[K"
+dbg_vew_trc_ms2
+	.sdataz <H'1b>"[24A"
+	.align	8
+
+	;/////////////////
+	;/// view step ///
+	;/////////////////
+
+	.export	dbg_vew_ste
+dbg_vew_ste:
+	sts.l	pr,@-sp
+	mov.l	#dbg_vew_trc_msg,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	bsr	dbg_ste_run_sub
+	nop
+	;
+	bra	dbg_vew_trc_0
+	nop
+
+	;//////////////////////////////////////
+	;/// disp registers and instruction ///
+	;//////////////////////////////////////
+
+	.export	dbg_dmp_rip
+dbg_dmp_rip:
+	sts.l	pr,@-sp	;!
+	bsr	dbg_dmp_reg
+	nop
+	;
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+dbg_dmp_rip_0	; from dbg_trc_run
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r0
+	add	#4+4,r0		; @(4+4,sp)=pr
+	bsr	dbg_dis_asm_brk_sub
+	mov.l	@r0,r0		; r0=pc
+	;
+	lds.l	@sp+,pr	;!
+	rts
+	sett
+
+	;/////////////////////
+	;/// dump register ///
+	;/////////////////////
+
+	.export	dbg_dmp_reg
+dbg_dmp_reg:
+	sts.l	pr,@-sp	;!
+dbg_dmp_reg_0
+	mov.l	#dsp_reg_msg,r1
+	bsr	dbg_puts_sub	;R0-7 :
+	nop
+	;
+	bsr	dbg_dmp_reg_r0
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r1
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r2
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r3
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r4
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r5
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r6
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r7
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r8
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r9
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r10
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r11
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r12
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r13
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r14
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r15
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_sr
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_gbr
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_mach
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_macl
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_pr
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_pc
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_ssr
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_vbr
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_spc
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_sgr
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_dbr
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r16
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r17
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r18
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r19
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r20
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r21
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r22
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_reg_r23
+	nop
+	;
+	lds.l	@sp+,pr	;!
+	rts
+	sett
+
+dbg_dmp_reg_r0
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r1
+	add	#4,r0		; @(4,sp)=r0
+	mov.l	@r0,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r1
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r1
+	mov.l	@r0,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r2
+	mov	r2,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r3
+	mov	r3,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r4
+	mov	r4,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r5
+	mov	r5,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r6
+	mov	r6,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r7
+	mov	r7,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r8
+	mov	r8,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r9
+	mov	r9,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r10
+	mov	r10,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r11
+	mov	r11,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r12
+	mov	r12,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r13
+	mov	r13,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r14
+	mov	r14,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r15
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r1
+	add	#4+4+4+4+4,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_sr
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r1
+	add	#4+4+4,r0	; @(4+4+4,sp)=pr
+	mov.l	@r0,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_gbr
+	stc	gbr,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_mach
+	sts	mach,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_macl
+	sts	macl,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_pr
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r1
+	add	#4+4+4+4,r0	; @(4+4+4+4,sp)=pr
+	mov.l	@r0,r0		; r0=pr
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_pc
+	mov.l	#dbg_usp,r0
+	mov.l	@r0,r0		; @sp=r0
+	add	#4+4,r0		; @(4+4,sp)=pr
+	mov.l	@r0,r0		; r0=pc
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_ssr
+	stc	ssr,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_vbr
+	stc	vbr,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_spc
+	stc	spc,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_sgr
+	stc	sgr,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_dbr
+	stc	dbr,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r16
+	stc	r0_bank,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r17
+	stc	r1_bank,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r18
+	stc	r2_bank,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r19
+	stc	r3_bank,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r20
+	stc	r4_bank,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r21
+	stc	r5_bank,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r22
+	stc	r6_bank,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_reg_r23
+	stc	r7_bank,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+
+	;///////////////////////////
+	;/// dump float register ///
+	;///////////////////////////
+
+	.export	dbg_dmp_frg
+dbg_dmp_frg:
+	sts.l	pr,@-sp		;!
+	mov.l	#dsp_frg_msg,r1
+	bsr	dbg_dmp_frg_sub
+	sts.l	fpul,@-sp	;!!
+	;
+	bsr	dbg_puts_sub
+	nop
+	;
+	bsr	dbg_dmp_frg_fpscr
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	mov.l	@sp,r0
+	bsr	dbg_dmp_frg_fpul
+	push	r1
+	;
+	frchg
+	bsr	dbg_dmp_frg_sub
+	pop	r1
+	;
+	frchg
+	lds.l	@sp+,fpul	;!!
+	lds.l	@sp+,pr		;!
+	rts
+	sett
+
+dbg_dmp_frg_sub
+	sts.l	pr,@-sp	;!
+	bsr	dbg_puts_sub	;FR0-7: or XF0-7:
+	nop
+	;
+	bsr	dbg_dmp_frg_fr0
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr1
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr2
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr3
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr4
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr5
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr6
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr7
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr8
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr9
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr10
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr11
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr12
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr13
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr14
+	push	r1
+	;
+	bsr	dbg_puts_sub
+	pop	r1
+	;
+	bsr	dbg_dmp_frg_fr15
+	push	r1
+	;
+	pop	r1
+	lds.l	@sp+,pr	;!
+	rts
+	nop
+
+dbg_dmp_frg_fr0
+	flds	fr0,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr1
+	flds	fr1,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr2
+	flds	fr2,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr3
+	flds	fr3,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr4
+	flds	fr4,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr5
+	flds	fr5,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr6
+	flds	fr6,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr7
+	flds	fr7,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr8
+	flds	fr8,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr9
+	flds	fr9,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr10
+	flds	fr10,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr11
+	flds	fr11,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr12
+	flds	fr12,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr13
+	flds	fr13,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr14
+	flds	fr14,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fr15
+	flds	fr15,fpul
+	sts	fpul,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fpscr
+	sts	fpscr,r0
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+dbg_dmp_frg_fpul	;<ent> r0=fpul
+	bra	dbg_puthn_sub
+	mov	#8,r1
+	;
+
+	;///////////////////////
+	;/// change register ///
+	;///////////////////////
+
+	.export	dbg_chn_reg
+dbg_chn_reg:
+	sts.l	pr,@-sp	;!
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#"    ",r1
+	mov	#24,r0
+dbg_chn_reg_0
+	push	r1	;!!
+	push	r0	;!!!
+	bsr	dbg_getche_sub
+	nop
+	cmp/eq	#H'0d,r0
+	bt	dbg_chn_reg_1
+	add	#-" ",r0
+	mov.l	@sp,r1	;!!!
+	shld	r1,r0
+	mov.l	@(4,sp),r1	;!!
+	add	r0,r1
+	pop	r0	;!!!
+	bsr	dbg_chn_reg_chk	;<ent> r0=shift,r1=data <ret> T=1:hit(r1=addr.)
+	mov.l	r1,@sp	;!!
+	;
+	bf	dbg_chn_reg_3	; not found !
+	pop	r1	;!!
+	bra	dbg_chn_reg_0
+	add	#-8,r0
+	;
+dbg_chn_reg_1
+	add	#4,sp	;!!!
+	mov.l	@sp,r1	;!!
+	bsr	dbg_chn_reg_chk
+	mov	#0,r0
+	;
+	bf	dbg_chn_reg_3	; not found !
+dbg_chn_reg_2
+	bsr	dbg_chn_reg_dsp
+	mov.l	r1,@sp	;!!
+	;
+	bsr	dbg_chn_msz_get_sub
+	mov	#4,r0
+	;
+	bt	dbg_chn_reg_2a
+	mov	r1,r0
+	cmp/eq	#" ",r0
+	bt	dbg_chn_reg_2b
+	cmp/eq	#".",r0
+	bt	dbg_chn_reg_3
+	cmp/eq	#H'0d,r0
+	bra	dbg_chn_reg_3
+	nop
+	;* set *
+dbg_chn_reg_2a
+	mov.l	@sp,r1
+	mov.l	@(8,r1),r1
+	jsr	@r1
+	nop
+	;* disp *
+dbg_chn_reg_2b
+	mov.l	@sp,r1
+	mov.l	@(4,r1),r1
+	jsr	@r1
+	nop
+	;
+	;* next *
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	mov.l	@sp,r1	;!!
+	add	#dbg_chn_reg_def_s-dbg_chn_reg_def,r1
+	mov.l	r1,@sp	;!!
+	mov.l	@r1,r0
+	cmp/eq	#0,r0
+	bf	dbg_chn_reg_2
+dbg_chn_reg_3
+	add	#4,sp	;!!
+	lds.l	@sp+,pr	;!
+	rts
+	nop
+
+dbg_chn_reg_chk:	;<ent> r0=shift,r1=data <ret> T=1:hit(r1=addr.) <brk>r1
+	push	r0	;!
+	neg	r0,r0
+	shld	r0,r1
+	push	r1	;!!
+	mov.l	#dbg_chn_reg_def,r1
+dbg_chn_reg_chk_0
+	push	r1	;!!!
+	mov.l	@r1,r1
+	tst	r1,r1
+	bt	dbg_chn_reg_chk_1	; end !
+	shld	r0,r1
+	push	r0	;!!!!
+	mov.l	@(8,sp),r0
+	cmp/eq	r0,r1
+	pop	r0	;!!!!
+	bt	dbg_chn_reg_chk_2	; hit !
+	pop	r1	;!!!
+	bra	dbg_chn_reg_chk_0
+	add	#dbg_chn_reg_def_s-dbg_chn_reg_def,r1
+	;
+dbg_chn_reg_chk_1
+	clrt
+dbg_chn_reg_chk_2
+	pop	r1	;!!!
+	add	#4,sp	;!!
+	rts
+	pop	r0	;!
+
+dbg_chn_reg_dsp:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov.b	@r1+,r0
+	;
+	bsr	dbg_putc_sub
+	mov.b	@r1+,r0
+	;
+	bsr	dbg_putc_sub
+	mov.b	@r1+,r0
+	;
+	bsr	dbg_putc_sub
+	mov.b	@r1+,r0
+	;
+	bsr	dbg_putc_sub
+	mov	#"=",r0
+	;
+	mov.l	@r1,r1
+	jsr	@r1
+	nop
+	;
+	mov	#"-",r0
+	bra	dbg_putc_sub
+	lds.l	@sp+,pr
+
+dbg_set_reg_r0
+	mov.l	#dbg_usp,r1
+	mov.l	@r1,r1		; @sp=r1
+	add	#4,r1		; @(4,sp)=r0
+	rts
+	mov.l	r0,@r1
+	;
+dbg_set_reg_r1
+	mov.l	#dbg_usp,r1
+	mov.l	@r1,r1		; @sp=r1
+	rts
+	mov.l	r0,@r1
+	;
+dbg_set_reg_r2
+	rts
+	mov	r0,r2
+	;
+dbg_set_reg_r3
+	rts
+	mov	r0,r3
+	;
+dbg_set_reg_r4
+	rts
+	mov	r0,r4
+	;
+dbg_set_reg_r5
+	rts
+	mov	r0,r5
+	;
+dbg_set_reg_r6
+	rts
+	mov	r0,r6
+	;
+dbg_set_reg_r7
+	rts
+	mov	r0,r7
+	;
+dbg_set_reg_r8
+	rts
+	mov	r0,r8
+	;
+dbg_set_reg_r9
+	rts
+	mov	r0,r9
+	;
+dbg_set_reg_r10
+	rts
+	mov	r0,r10
+	;
+dbg_set_reg_r11
+	rts
+	mov	r0,r11
+	;
+dbg_set_reg_r12
+	rts
+	mov	r0,r12
+	;
+dbg_set_reg_r13
+	rts
+	mov	r0,r13
+	;
+dbg_set_reg_r14
+	rts
+	mov	r0,r14
+	;
+dbg_set_reg_r15
+	mov.l	#dbg_usp,r1
+	add	#-(4+4+4+4+4),r0
+	rts
+	mov.l	r0,@r1
+	;
+dbg_set_reg_sr
+	mov.l	#dbg_usp,r1
+	mov.l	@r1,r1		; @sp=r1
+	add	#4+4+4,r1	; @(4+4+4,sp)=pr
+	rts
+	mov.l	r0,@r1
+	;
+dbg_set_reg_gbr
+	rts
+	ldc	r0,gbr
+	;
+dbg_set_reg_mach
+	rts
+	lds	r0,mach
+	;
+dbg_set_reg_macl
+	rts
+	lds	r0,macl
+	;
+dbg_set_reg_pr
+	mov.l	#dbg_usp,r1
+	mov.l	@r1,r1		; @sp=r1
+	add	#4+4+4+4,r1	; @(4+4+4+4,sp)=pr
+	rts
+	mov.l	r0,@r1
+	;
+dbg_set_reg_pc
+	mov.l	#dbg_usp,r1
+	mov.l	@r1,r1		; @sp=r1
+	add	#4+4,r1		; @(4+4,sp)=pr
+	rts
+	mov.l	r0,@r1
+	;
+dbg_set_reg_ssr
+	rts
+	ldc	r0,ssr
+	;
+dbg_set_reg_vbr
+	rts
+	ldc	r0,vbr
+	;
+dbg_set_reg_spc
+	rts
+	ldc	r0,spc
+	;
+;dbg_set_reg_sgr
+;	rts
+;	ldc	r0,sgr
+	;
+dbg_set_reg_dbr
+	rts
+	ldc	r0,dbr
+	;
+dbg_set_reg_r16
+	rts
+	ldc	r0,r0_bank
+	;
+dbg_set_reg_r17
+	rts
+	ldc	r0,r1_bank
+	;
+dbg_set_reg_r18
+	rts
+	ldc	r0,r2_bank
+	;
+dbg_set_reg_r19
+	rts
+	ldc	r0,r3_bank
+	;
+dbg_set_reg_r20
+	rts
+	ldc	r0,r4_bank
+	;
+dbg_set_reg_r21
+	rts
+	ldc	r0,r5_bank
+	;
+dbg_set_reg_r22
+	rts
+	ldc	r0,r6_bank
+	;
+dbg_set_reg_r23
+	rts
+	ldc	r0,r7_bank
+	;
+
+	.align	4
+dbg_chn_reg_def	;reg  , disp         , set
+	.data.l	"R0  ",dbg_dmp_reg_r0,dbg_set_reg_r0
+dbg_chn_reg_def_s
+	.data.l	"R1  ",dbg_dmp_reg_r1,dbg_set_reg_r1
+	.data.l	"R2  ",dbg_dmp_reg_r2,dbg_set_reg_r2
+	.data.l	"R3  ",dbg_dmp_reg_r3,dbg_set_reg_r3
+	.data.l	"R4  ",dbg_dmp_reg_r4,dbg_set_reg_r4
+	.data.l	"R5  ",dbg_dmp_reg_r5,dbg_set_reg_r5
+	.data.l	"R6  ",dbg_dmp_reg_r6,dbg_set_reg_r6
+	.data.l	"R7  ",dbg_dmp_reg_r7,dbg_set_reg_r7
+	.data.l	"R8  ",dbg_dmp_reg_r8,dbg_set_reg_r8
+	.data.l	"R9  ",dbg_dmp_reg_r9,dbg_set_reg_r9
+	.data.l	"R10 ",dbg_dmp_reg_r10,dbg_set_reg_r10
+	.data.l	"R11 ",dbg_dmp_reg_r11,dbg_set_reg_r11
+	.data.l	"R12 ",dbg_dmp_reg_r12,dbg_set_reg_r12
+	.data.l	"R13 ",dbg_dmp_reg_r13,dbg_set_reg_r13
+	.data.l	"R14 ",dbg_dmp_reg_r14,dbg_set_reg_r14
+	.data.l	"R15 ",dbg_dmp_reg_r15,dbg_set_reg_r15
+	.data.l "SR  ",dbg_dmp_reg_sr,dbg_set_reg_sr
+	.data.l	"GBR ",dbg_dmp_reg_gbr,dbg_set_reg_gbr
+	.data.l	"MACH",dbg_dmp_reg_mach,dbg_set_reg_mach
+	.data.l	"MACL",dbg_dmp_reg_macl,dbg_set_reg_macl
+	.data.l	"PR  ",dbg_dmp_reg_pr,dbg_set_reg_pr
+	.data.l	"PC  ",dbg_dmp_reg_pc,dbg_set_reg_pc
+	.data.l	"SSR ",dbg_dmp_reg_ssr,dbg_set_reg_ssr
+	.data.l	"VBR ",dbg_dmp_reg_vbr,dbg_set_reg_vbr
+	.data.l	"SPC ",dbg_dmp_reg_spc,dbg_set_reg_spc
+;	.data.l	"SGR ",dbg_dmp_reg_sgr,dbg_set_reg_sgr
+	.data.l	"DBR ",dbg_dmp_reg_dbr,dbg_set_reg_dbr
+	.data.l	"R'0 ",dbg_dmp_reg_r16,dbg_set_reg_r16
+	.data.l	"R'1 ",dbg_dmp_reg_r17,dbg_set_reg_r17
+	.data.l	"R'2 ",dbg_dmp_reg_r18,dbg_set_reg_r18
+	.data.l	"R'3 ",dbg_dmp_reg_r19,dbg_set_reg_r19
+	.data.l	"R'4 ",dbg_dmp_reg_r20,dbg_set_reg_r20
+	.data.l	"R'5 ",dbg_dmp_reg_r21,dbg_set_reg_r21
+	.data.l	"R'6 ",dbg_dmp_reg_r22,dbg_set_reg_r22
+	.data.l	"R'7 ",dbg_dmp_reg_r23,dbg_set_reg_r23
+	.data.l	0	; end
+
+dbg_sta_msg_crlf
+	.sdata	<H'0d><H'0a>
+dbg_sta_msg
+	.sdataz	"=== debugging mode in ==="<H'0d><H'0a>
+dbg_stp_msg
+	.sdataz	"=== debugging mode out ==="
+break_msg
+	.sdataz	"user break !"<H'0d><H'0a>
+pc_break_msg
+	.sdataz	"program counter break !"<H'0d><H'0a>
+pcb_set_msg
+	.sdata	"Set "		; continue next line !
+pcb_dsp_msg
+	.sdataz	"PB="
+pcb_clr_msg
+	.sdataz	"PB clear"
+dsp_reg_msg
+	.sdata	"R0-7 :"<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>
+	.sdata	<H'0d><H'0a>
+	.sdata	"R8-15:"<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>
+	.sdata	<H'0d><H'0a>
+	.sdata	" SR:"<0>" GBR:"<0>" MACH:"<0>" MACL:"<0>" PR:"<0>" PC:"<0>
+	.sdata	<H'0d><H'0a>
+	.sdata	"SSR:"<0>" VBR:"<0>"  SPC:"<0>"  SGR:"<0>"            DBR:"<0>
+	.sdata	<H'0d><H'0a>
+	.sdata	"R'0-7:"<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>
+;R0-7 :00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+;R8-15:00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+; SR:00000000 GBR:00000000 MACH:00000000 MACL:00000000 PR:00000000 PC:00000000
+;SSR:00000000 VBR:00000000  SPC:00000000  SGR:00000000            DBR:00000000
+;R'0-7:00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+
+dsp_frg_msg
+	.sdata	"FR0-7:"<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>
+	.sdata	<H'0d><H'0a>
+	.sdata	" 8-15:"<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>
+	.sdata	<H'0d><H'0a>
+	.sdata	"FPSCR:"<0>"     FPUL:"<0>
+	.sdata	<H'0d><H'0a>
+	.sdata	"XF0-7:"<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>
+	.sdata	<H'0d><H'0a>
+	.sdata	" 8-15:"<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>" "<0>
+;FR0-7:00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+; 8-15:00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+;FPSCR:00000000     FPUL:00000000
+;XF0-7:00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+; 8-15:00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+
+	.end
+

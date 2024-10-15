@@ -1,0 +1,236 @@
+;
+;	Program	__HLPDSP.SRC
+;	Date	2001/1/5 .. 2001/1/6
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/1/13	section P0 -> DBG_P1
+; 2001/1/16	add dmp_mem help
+; 2001/1/29	add dmp_siz help
+; 2001/2/18	modify section offset
+; 2001/2/20	add wri_fla help
+; 2001/3/6	add lod_sfo, wrf_rst, ini_mem help
+; 2001/3/24	add sys_rst help
+; 2001/3/28	add import function
+; 2001/5/19	add dis_asm, dmp_ipr, dmp_reg
+; 2001/7/9	add dmp_frg
+; 2001/8/15	add brk_run, ste_run, trc_run, ste_one, trc_one, pcb_set ...
+; 2001/9/22	modify jump -> branch, filename, add chn_mem
+; 2001/9/23	add chn_msz
+; 2001/9/24	add chn_reg
+; 2001/11/17	add dmp_wch, wch_siz
+; 2001/12/2	add vew_lst, vew_trc, vew_ste
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_puts
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_puts_sub
+	branch	dbg_puts
+
+	;////////////////////////////
+	;/// help message display ///
+	;////////////////////////////
+
+	.import	dbg_entry_msg
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_hlp_dsp2
+dbg_hlp_dsp2:
+	sts.l	pr,@-sp
+	mov.l	#hlp_msg_dbg,r1
+	bra	dbg_hlp_dsp_0
+	mov	#">",r0
+
+	.export	dbg_hlp_dsp
+dbg_hlp_dsp:
+	sts.l	pr,@-sp
+	mov.l	#hlp_msg_mon,r1
+	mov	#"*",r0
+dbg_hlp_dsp_0	; from dbg_hlp_dsp2
+	push	r0	;!
+	push	r1	;!!
+	mov.l	#dbg_entry_msg,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+	mov.l	#hlp_msg_def,r1
+	bsr	dbg_puts_sub
+	nop
+	;
+dbg_hlp_dsp_1
+	mov.l	@sp,r1	;!!
+	mov.l	@r1+,r0
+	cmp/eq	#0,r0
+	bt	dbg_hlp_dsp_2	; end !
+	;* left *
+	mov.l	r1,@sp	;!!
+	mov.l	r0,r1
+	bsr	dbg_putc_sub	; CR
+	mov	#H'0d,r0	;
+	;
+	bsr	dbg_putc_sub	; LF
+	mov	#H'0a,r0	;
+	;
+	bsr	dbg_putc_sub	;(sp)
+	mov	#" ",r0
+	;
+	bsr	dbg_putc_sub
+	mov.l	@(4,sp),r0	;!
+	;
+	bsr	dbg_puts_sub
+	nop
+	;
+	;* right *
+	mov.l	@sp,r1	;!!
+	mov.l	@r1+,r0
+	cmp/eq	#0,r0
+	bt	dbg_hlp_dsp_2	; end !
+	mov.l	r1,@sp	;!!
+	mov.l	r0,r1
+	bsr	dbg_putc_sub
+	mov.l	@(4,sp),r0	;!
+	;
+	bsr	dbg_puts_sub
+	nop
+	;
+	bra	dbg_hlp_dsp_1
+	nop
+	;
+dbg_hlp_dsp_2
+	add	#8,sp	;!! !
+	lds.l	@sp+,pr
+	rts
+	sett
+
+hlp_msg_mon
+	.data.l	exi_cmd_hlp
+	.data.l	dbg_min_hlp
+	.data.l	dmp_mem_hlp
+	.data.l	dmp_siz_hlp
+	.data.l	ini_mem_hlp
+	.data.l	dis_asm_hlp
+	.data.l	chn_mem_hlp
+	.data.l	chn_msz_hlp
+	.data.l	dmp_wch_hlp
+	.data.l	wch_siz_hlp
+	;
+	.data.l	lod_sfo_hlp
+	.data.l	wri_fla_hlp
+	.data.l	wrf_rst_hlp
+	.data.l	sys_rst_hlp
+	.data.l	hlp_msg_hlp
+	.data.l	0
+
+hlp_msg_dbg
+	.data.l	dbg_out_hlp
+	.data.l	dmp_mem_hlp
+	.data.l	dmp_siz_hlp
+	.data.l	ini_mem_hlp
+	.data.l	dmp_reg_hlp
+	.data.l	dis_asm_hlp
+	.data.l	dmp_ipr_hlp
+	.data.l	dmp_frg_hlp
+	.data.l	brk_run_hlp
+	.data.l	ste_one_hlp
+	.data.l	trc_one_hlp
+	.data.l	ste_run_hlp
+	.data.l	trc_run_hlp
+	.data.l	pcb_set_hlp
+	.data.l	pcb_clr_hlp
+	.data.l	pcb_dsp_hlp
+	.data.l	chn_mem_hlp
+	.data.l	chn_msz_hlp
+	.data.l	chn_reg_hlp
+	.data.l	vew_lst_hlp
+	.data.l	vew_trc_hlp
+	.data.l	vew_ste_hlp
+	;
+	.data.l	lod_sfo_hlp
+	.data.l	wri_fla_hlp
+	.data.l	wrf_rst_hlp
+	.data.l	sys_rst_hlp
+	.data.l	hlp_msg_hlp
+	.data.l	0
+
+hlp_msg_def	;123456789012345678901234567890123456789
+	.data.b	H'0d,H'0a
+	.sdata	" SS=start, EE=end, LL=length, WW=wide,"
+	.sdataz	" NN=line, II=initial, RR=reg., BB=addr."
+exi_cmd_hlp
+	.sdataz	"@               exit monitor          "
+dbg_min_hlp
+	.sdataz	"DI[CR]          debug mode in         "
+dbg_out_hlp
+	.sdataz	"DO[CR]          debug mode out        "
+dmp_mem_hlp
+	.sdataz	"DM-SS,EE[CR]    dump memory           "
+dmp_siz_hlp
+	.sdataz	"DS-SS,LL,WW[CR] dump memory size      "
+ini_mem_hlp
+	.sdataz	"IM-SS,EE,II[CR] initial memory        "
+dmp_reg_hlp
+	.sdataz	"DR[CR]          dump register         "
+dis_asm_hlp
+	.sdataz "DA-SS,NN[CR]    dis assemble          "
+dmp_ipr_hlp
+	.sdataz	"DI[CR]          dump reg. and inst.   "
+dmp_frg_hlp
+	.sdataz	"DF[CR]          dump float register   "
+brk_run_hlp
+	.sdataz	"G[CR]           go with break         "
+ste_one_hlp
+	.sdataz	"S[CR]           single step           "
+trc_one_hlp
+	.sdataz	"T[CR]           single trace          "
+ste_run_hlp
+	.sdataz	"ST-NN[CR]       step                  "
+trc_run_hlp
+	.sdataz	"TR-NN[CR]       trace                 "
+pcb_set_hlp
+	.sdataz	"PB-BB[CR]       program break set     "
+pcb_clr_hlp
+	.sdataz	"_PB[CR]         program break clear   "
+pcb_dsp_hlp
+	.sdataz	"?PB[CR]         program break disp    "
+chn_mem_hlp
+	.sdataz	"CM-SS[CR]       change memory         "
+chn_msz_hlp
+	.sdataz	"CS-SS,WW[CR]    change memory size    "
+dmp_wch_hlp
+	.sdataz	"DW-SS,EE[CR]    dump memory watch     "
+wch_siz_hlp
+	.sdataz	"WS-SS,LL,WW[CR] watch memory size     "
+chn_reg_hlp
+	.sdataz	"CR-RR[CR]       change register       "
+vew_lst_hlp
+	.sdataz	"VL              view list             "
+vew_trc_hlp
+	.sdataz	"VT              view trace            "
+vew_ste_hlp
+	.sdataz	"VS              view step             "
+lod_sfo_hlp
+	.sdataz	"LS-OS[CR]       load s format         "
+wri_fla_hlp
+	.sdataz	"WF-SR,DS,LL[CR] write flash           "
+wrf_rst_hlp
+	.sdataz	"WR-SR,DS,LL[CR] write flash and reset "
+sys_rst_hlp
+	.sdataz	"Reset[CR]       system reset          "
+hlp_msg_hlp
+	.sdataz	"?[CR]           this help message     "
+
+	.end
+

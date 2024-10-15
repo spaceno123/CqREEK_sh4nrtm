@@ -1,0 +1,75 @@
+;
+;	Program	__INIMEM.SRC
+;	Date	2001/3/6 .. 2001/3/6
+;	Copyright (C) 2001 by AKIYA
+;
+;--- up date ---
+; 2001/3/28	add import function
+; 2001/9/22	modify branch -> branch, filename
+;
+
+	.include	"include\ioregs.inc"
+	.include	"include\macros.inc"
+
+	;#######################
+	;### import function ###
+	;#######################
+
+	.import	dbg_putc, dbg_scanf
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+dbg_putc_sub
+	branch	dbg_putc
+
+dbg_scanf_sub
+	branch	dbg_scanf
+
+	;/////////////////////////
+	;/// initialize memory ///
+	;/////////////////////////
+
+	.section	DBG_P1, CODE, ALIGN=8
+
+	.export	dbg_ini_mem
+dbg_ini_mem:
+	sts.l	pr,@-sp
+	bsr	dbg_putc_sub
+	mov	#"-",r0
+	;
+	mov.l	#dbg_ini_mem_scn,r1
+	bsr	dbg_scanf_sub
+	add	#-4,sp		;!
+	;
+	bf	dbg_ini_mem_3	; error !
+dbg_ini_mem_0
+	cmp/hi	r1,r0
+	bt	dbg_ini_mem_3	; end < write !
+	push	r2		;!!
+	mov.l	#startof DBG_B1,r2
+	cmp/hi	r0,r2
+	bt	dbg_ini_mem_1	; write < work_top !
+	mov.l	#startof DBG_B1 + sizeof DBG_B1,r2
+	cmp/hs	r2,r0
+	bf	dbg_ini_mem_2	; work_end =< write !
+	;* write *
+dbg_ini_mem_1
+	mov.l	@(4,sp),r2	;!
+	mov.b	r2,@r0
+dbg_ini_mem_2
+	pop	r2		;!!
+	bra	dbg_ini_mem_0
+	add	#1,r0
+	;
+dbg_ini_mem_3
+	add	#4,sp	;!
+	lds.l	@sp+,pr
+	rts
+	nop
+dbg_ini_mem_scn
+	.sdataz	"%x,%x,%2x\r"
+
+	.section	DBG_B1, DATA, ALIGN=8
+
+	.end
+
